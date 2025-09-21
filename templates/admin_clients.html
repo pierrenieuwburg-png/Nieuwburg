@@ -1,0 +1,51 @@
+{% extends "admin_base.html" %}
+{% block title %}Manage Clients{% endblock %}
+
+{% block content %}
+
+<div class="admin-header">
+<h1>Client Management</h1>
+<a href="{{ url_for('admin_add_client') }}" class="cta">Add New Client</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="flash-messages" style="margin-bottom: 20px;">
+{% for category, message in messages %}
+<div class="flash {{ category }}">{{ message }}</div>
+{% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+<div class="admin-section">
+<table class="data-table">
+<thead>
+  <tr>
+    <th>Name</th>
+    <th>Email</th>
+    <th>Phone</th>
+    <th>Address</th>
+    <th style="width: 120px;">Actions</th> <!-- Give actions a fixed width -->
+  </tr>
+</thead>
+<tbody>
+{% for client in clients %}
+<tr>
+<td>{{ client.profile.full_name or 'N/A' }}</td>
+<td>{{ client.email }}</td>
+<td>{{ client.profile.phone_number or 'N/A' }}</td>
+<td>{{ client.profile.address or 'N/A' }}</td>
+<td>
+     <a href="{{ url_for('admin_view_client', user_id=client.id) }}" class="cta-outline-small">View</a>
+</td>
+</tr>
+{% else %}
+<tr>
+<td colspan="5" style="text-align: center; padding: 20px;">No clients found.</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %}

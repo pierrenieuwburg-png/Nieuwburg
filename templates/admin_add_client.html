@@ -1,0 +1,45 @@
+{% extends "admin_base.html" %}
+{% block title %}Add Client{% endblock %}
+
+{% block content %}
+
+<div class="admin-header">
+<h1>Add New Client</h1>
+<a href="{{ url_for('admin_clients') }}" class="cta-outline">Back to Client List</a>
+</div>
+
+<div class="admin-section">
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="flash-messages" style="margin-bottom: 20px;">
+{% for category, message in messages %}
+<div class="flash {{ category }}">{{ message }}</div>
+{% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+<form method="POST" class="profile-form" style="max-width: 600px; margin: 0;">
+    {{ form.hidden_tag() }} <p style="font-size: 0.9rem; color: #555;">Create a new client account. A default password 'password' will be set, which they can change later.</p>
+    
+    <div class="form-group">
+        {{ form.full_name.label }}
+        {{ form.full_name() }}
+    </div>
+    <div class="form-group">
+        {{ form.email.label }}
+        {{ form.email() }}
+    </div>
+    <div class="form-group">
+        {{ form.phone_number.label }}
+        {{ form.phone_number() }}
+    </div>
+    <div class="form-group">
+        {{ form.address.label }}
+        {{ form.address(rows=3) }}
+    </div>
+    
+    {{ form.submit(class="cta") }}
+</form>
+</div>
+{% endblock %}

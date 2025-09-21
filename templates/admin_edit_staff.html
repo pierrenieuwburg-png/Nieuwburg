@@ -1,0 +1,63 @@
+{% extends "admin_base.html" %}
+{% block title %}Edit Staff{% endblock %}
+
+{% block content %}
+
+<div class="admin-header">
+<h1>Edit: {{ staff_member.profile.full_name }}</h1>
+<a href="{{ url_for('admin_staff') }}" class="cta-outline">Back to Staff List</a>
+</div>
+
+<div class="admin-section">
+<form method="POST" enctype="multipart/form-data" class="profile-form" style="max-width: 600px; margin: 0;">
+    {{ form.hidden_tag() }} <div class="form-group profile-image-edit">
+        {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
+        <img src="{{ url_for('static', filename='uploads/' + staff_member.profile.profile_image) }}"
+             alt="Profile Preview"
+             id="profile-preview"
+             onerror="this.onerror=null;this.src='{{ default_avatar_url }}';">
+        
+        <label for="profile_image" class="cta-outline">Change Photo</label>
+        {{ form.profile_image(class="hidden", id="profile_image") }} </div>
+
+    <div class="form-group">
+        {{ form.full_name.label }}
+        {{ form.full_name(class="form-control") }}
+    </div>
+
+    <div class="form-group">
+        <label for="email">Email (Cannot be changed)</label>
+        <input type="email" id="email" name="email" value="{{ staff_member.email }}" disabled>
+    </div>
+
+    <div class="form-group">
+        {{ form.phone_number.label }}
+        {{ form.phone_number(class="form-control") }}
+    </div>
+    
+    {{ form.submit(class="cta") }}
+</form>
+</div>
+
+<script>
+// This preview script can remain as it enhances user experience
+document.addEventListener('DOMContentLoaded', function() {
+    const profileImageInput = document.getElementById('profile_image');
+    const profilePreview = document.getElementById('profile-preview');
+
+    if (profileImageInput && profilePreview) {
+        profileImageInput.addEventListener('change', function() {
+            const file = this.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    profilePreview.src = e.target.result;
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+});
+</script>
+
+{% endblock %}

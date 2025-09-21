@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}Admin{% endblock %} - Nieuwburg Blitz</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="admin-body">
+  <div class="admin-layout">
+    <aside class="admin-sidebar">
+      <div class="admin-brand">
+        <img src="{{ url_for('static', filename='img/LogoBlackWithTitle.png') }}" alt="Nieuwburg Blitz Logo">
+        <span>Admin Panel</span>
+      </div>
+      <nav class="admin-nav">
+        <a href="{{ url_for('admin_dashboard') }}" class="admin-nav-link">Dashboard</a>
+        <a href="#" class="admin-nav-link">Bookings</a>
+        <a href="{{ url_for('admin_clients') }}" class="admin-nav-link">Clients</a>
+        <a href="{{ url_for('admin_staff') }}" class="admin-nav-link">Staff</a>
+        <a href="{{ url_for('admin_quotes') }}" class="admin-nav-link">Quotes</a>
+        <a href="{{ url_for('admin_invoices') }}" class="admin-nav-link">Invoices</a>
+    </nav>
+      <div class="admin-sidebar-footer">
+        <a href="{{ url_for('profile') }}">Edit My Profile</a>
+        <a href="{{ url_for('index') }}">View Public Site</a>
+        <a href="{{ url_for('logout') }}">Logout</a>
+      </div>
+    </aside>
+    <main class="admin-main-content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

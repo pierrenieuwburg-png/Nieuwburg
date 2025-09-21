@@ -1,0 +1,33 @@
+{% extends "admin_base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>Dashboard</h1>
+  <p>Welcome back, {{ current_user.profile.full_name or current_user.email }}!</p>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <h2>New Quotes</h2>
+    <p class="stat-number">0</p>
+  </div>
+  <div class="stat-card">
+    <h2>Upcoming Cleans</h2>
+    <p class="stat-number">0</p>
+  </div>
+  <div class="stat-card">
+    <h2>Active Clients</h2>
+    <p class="stat-number">0</p>
+  </div>
+  <div class="stat-card">
+    <h2>Staff Members</h2>
+    <p class="stat-number">0</p>
+  </div>
+</div>
+
+<div class="admin-section">
+  <h2>Recent Activity</h2>
+  <p>Activity feed will be displayed here.</p>
+</div>
+{% endblock %}

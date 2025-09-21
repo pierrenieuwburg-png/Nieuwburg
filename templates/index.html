@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block banner %}
+<div class="team-banner">
+  <div class="banner-overlay">
+    <h1>Blitz Cleaning Services for <span id="typed-text"></span></h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<section id="services" class="container full-screen">
+  <div class="services-title-box">
+    <h1>Our Services</h1>
+    <p>Professional cleaning solutions that leave your space spotless.</p>
+  </div>
+  <div class="services-header">
+    <p>Click a service below to learn more.</p>
+  </div>
+  <div class="services-grid">
+    <div class="service-tile" data-service="residential" role="button" tabindex="0"><h3>Residential Cleaning</h3></div>
+    <div class="service-tile" data-service="commercial" role="button" tabindex="0"><h3>Office Cleaning</h3></div>
+    <div class="service-tile" data-service="deep" role="button" tabindex="0"><h3>Deep Blitz Cleaning</h3></div>
+    <div class="service-tile" data-service="tenancy" role="button" tabindex="0"><h3>End of tenancy Cleaning</h3></div>
+  </div>
+</section>
+
+<section id="process" class="full-screen">
+  <div class="process-container-split">
+    <div class="timeline-left-vertical">
+      <div class="timeline-progress"></div>
+      <div class="timeline-item-vertical" data-step="1"><div class="timeline-step">📋</div><div class="timeline-content"><h3>Get a Quote</h3></div></div>
+      <div class="timeline-item-vertical" data-step="2"><div class="timeline-step">🗓️</div><div class="timeline-content"><h3>Schedule Clean</h3></div></div>
+      <div class="timeline-item-vertical" data-step="3"><div class="timeline-step">✨</div><div class="timeline-content"><h3>We Make It Sparkle</h3></div></div>
+      <div class="timeline-item-vertical" data-step="4"><div class="timeline-step">🛋️</div><div class="timeline-content"><h3>You Relax</h3></div></div>
+    </div>
+    <div class="timeline-right">
+      <div class="timeline-content-panel" data-content-for="1">
+        <h2>Step 1: Get a Quote</h2>
+        <p>It all starts with our easy-to-use online form. Provide property details and cleaning needs for a comprehensive, obligation-free quote.</p>
+      </div>
+      <div class="timeline-content-panel" data-content-for="2">
+        <h2>Step 2: Schedule Your Clean</h2>
+        <p>Once you approve the quote, our friendly office staff will contact you to confirm all the details and book a convenient time that fits your schedule.</p>
+      </div>
+      <div class="timeline-content-panel" data-content-for="3">
+        <h2>Step 3: We Make It Sparkle</h2>
+        <p>Our professional, supervised team arrives on time with all necessary equipment and supplies to transform your space, paying close attention to every detail.</p>
+      </div>
+      <div class="timeline-content-panel" data-content-for="4">
+        <h2>Step 4: You Relax</h2>
+        <p>With the cleaning complete, all that's left is to enjoy your spotless, refreshed environment. It's professional cleaning without the hassle.</p>
+        <div class="timeline-cta"><button class="cta" id="process-quote-button">Request a Quote</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="about" class="container full-screen">
+  <div class="about-grid">
+    <div class="about-image-col">
+      <img src="{{ url_for('static', filename='img/cleanhome_banner.jpg') }}" alt="A clean and modern living space">
+    </div>
+    <div class="about-content-col">
+      <h2 class="section-title">About Nieuwburg Blitz</h2>
+      <p class="about-lead">With <strong>25 years of experience</strong> serving Cape Town and surrounds, Nieuwburg Blitz Cleaning Services specializes in efficient and reliable blitz cleaning.</p>
+      <p>We are a trusted partner for numerous local agencies, providing impeccable end-of-tenancy cleanings. Our team is trained in speed cleaning and is supervised on-site, ensuring quick turnarounds and high-quality, professional results every time.</p>
+      <p>We understand the importance of having properties immaculately prepared for new tenants without delay. We would appreciate the opportunity to discuss how we can support you with fast and efficient cleaning solutions.</p>
+      <div class="about-cta">
+        <a href="#" id="about-contact-btn" class="cta">Get in Touch</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="gallery">
+  <div class="gallery-container">
+    <h2 class="section-title">See the Difference</h2>
+    <p class="section-subtitle">A few examples of our transformations.</p>
+    <div class="gallery-grid">
+      
+      <div class="gallery-pair">
+        <div class="gallery-image">
+          <img src="{{ url_for('static', filename='img/BannerKitchenImage.png') }}" alt="Kitchen before cleaning">
+          <div class="image-label">Before</div>
+        </div>
+        <div class="gallery-image">
+          <img src="{{ url_for('static', filename='img/cleanhome_banner.jpg') }}" alt="Kitchen after cleaning">
+          <div class="image-label">After</div>
+        </div>
+      </div>
+
+      <div class="gallery-pair">
+        <div class="gallery-image">
+          <img src="{{ url_for('static', filename='img/BannerKitchenImage.png') }}" alt="Bathroom before cleaning">
+          <div class="image-label">Before</div>
+        </div>
+        <div class="gallery-image">
+          <img src="{{ url_for('static', filename='img/cleanhome_banner.jpg') }}" alt="Bathroom after cleaning">
+          <div class="image-label">After</div>
+        </div>
+      </div>
+
+      <div class="gallery-pair">
+        <div class="gallery-image">
+          <img src="{{ url_for('static', filename='img/BannerKitchenImage.png') }}" alt="Living room before cleaning">
+          <div class="image-label">Before</div>
+        </div>
+        <div class="gallery-image">
+          <img src="{{ url_for('static', filename='img/cleanhome_banner.jpg') }}" alt="Living room after cleaning">
+          <div class="image-label">After</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="view-more-container">
+      <a href="{{ url_for('gallery') }}" class="cta view-more-btn">View More</a>
+    </div>
+
+  </div>
+</section>
+
+<section id="testimonials">
+  <div class="testimonial-container">
+    <h2 class="section-title">Client Stories</h2>
+    <div class="testimonial-slider">
+      <div class="testimonial-card active">
+        <blockquote>"The end-of-tenancy clean was impeccable. The team was efficient, professional, and the agency was thrilled with the result. We got our full deposit back without any issues. Highly recommended!"</blockquote>
+        <cite>&mdash; Sarah L., Northern Suburbs</cite>
+      </div>
+      <div class="testimonial-card">
+        <blockquote>"As a busy office manager, I can't recommend Nieuwburg Blitz enough. They are reliable, thorough, and our workspace has never looked better. It makes a huge difference to our team's morale."</blockquote>
+        <cite>&mdash; David C., CBD</cite>
+      </div>
+      <div class="testimonial-card">
+        <blockquote>"After the renovations, our home was a disaster zone. The post-construction clean was a lifesaver. They handled all the dust and debris, leaving the place sparkling and ready to live in."</blockquote>
+        <cite>&mdash; Megan P., Durbanville</cite>
+      </div>
+      <div class="testimonial-nav">
+        <button id="prev-testimonial" class="nav-arrow" aria-label="Previous testimonial">&#8249;</button>
+        <button id="next-testimonial" class="nav-arrow" aria-label="Next testimonial">&#8250;</button>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

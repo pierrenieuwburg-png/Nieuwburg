@@ -1,0 +1,42 @@
+{% extends "admin_base.html" %}
+{% block title %}View Staff{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+    <h1>{{ staff_member.profile.full_name }}</h1>
+    <div>
+        <a href="{{ url_for('admin_staff') }}" class="cta-outline">Back to Staff List</a>
+        <a href="{{ url_for('admin_edit_staff', user_id=staff_member.id) }}" class="cta">Edit Details</a>
+    </div>
+</div>
+
+<div class="admin-section">
+    <h2>Personal Details</h2>
+    <div class="profile-details">
+        <div class="detail-item"><label>Full Name</label><p>{{ staff_member.profile.full_name or 'N/A' }}</p></div>
+        <div class="detail-item"><label>Email</label><p>{{ staff_member.email or 'N/A' }}</p></div>
+        <div class="detail-item"><label>Phone Number</label><p>{{ staff_member.profile.phone_number or 'N/A' }}</p></div>
+        <div class="detail-item"><label>Physical Address</label><p>{{ staff_member.profile.address or 'N/A' }}</p></div>
+        <hr>
+        <div class="detail-item"><label>ID Number</label><p>{{ staff_member.profile.id_number or 'N/A' }}</p></div>
+        <div class="detail-item"><label>Date of Birth</label><p>{{ staff_member.profile.date_of_birth.strftime('%d %B %Y') if staff_member.profile.date_of_birth else 'N/A' }}</p></div>
+        <div class="detail-item"><label>Age</label><p>{{ age or 'N/A' }}</p></div>
+    </div>
+</div>
+
+<div class="admin-section">
+    <h2>Notes</h2>
+    <form action="{{ url_for('admin_update_notes', user_id=staff_member.id) }}" method="POST">
+        <textarea name="notes" rows="6" style="width: 100%; font-family: inherit; padding: 10px; border-radius: 4px; border: 1px solid #ccc;">{{ staff_member.profile.notes or '' }}</textarea>
+        <button type="submit" class="cta" style="margin-top: 15px;">Save Notes</button>
+    </form>
+</div>
+
+<div class="admin-section">
+    <h2 style="color: #c82333;">Danger Zone</h2>
+    <form action="{{ url_for('admin_delete_staff', user_id=staff_member.id) }}" method="POST" onsubmit="return confirm('DANGER: You are about to permanently delete this staff member. This action cannot be undone. Are you absolutely sure?');">
+        <p>Permanently remove this staff member and all associated data from the system.</p>
+        <button type="submit" class="cta-danger">Delete Staff Member</button>
+    </form>
+</div>
+{% endblock %}

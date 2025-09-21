@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Invoice {{ invoice.invoice_number }}</title>
+    <style>
+        @page { size: A4; margin: 1.5cm; }
+        body { font-family: Arial, sans-serif; font-size: 11px; color: #333; }
+        .invoice-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+        .invoice-header .logo { width: 120px; }
+        .invoice-title { text-align: right; }
+        .invoice-title h1 { margin: 0; font-size: 36px; }
+        .invoice-details { display: flex; justify-content: space-between; margin-bottom: 30px; }
+        .line-items-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .line-items-table th, .line-items-table td { padding: 10px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+        .line-items-table th { background-color: #f5f5f5; }
+        .invoice-totals { margin-top: 20px; width: 40%; margin-left: auto; }
+        .totals-row { display: flex; justify-content: space-between; padding: 8px; }
+        .totals-row.grand-total { font-weight: bold; font-size: 14px; background-color: #f5f5f5; border-top: 2px solid #333; }
+    </style>
+</head>
+<body>
+    <div class="invoice-header">
+        <img src="{{ url_for('static', filename='img/LogoBlackWithTitle.png', _external=True) }}" alt="Logo" class="logo">
+        <div class="invoice-title">
+            <h1>INVOICE</h1>
+            <p><strong>Invoice Number:</strong> {{ invoice.invoice_number }}</p>
+            <p><strong>Date:</strong> {{ invoice.invoice_date.strftime('%d %b %Y') }}</p>
+            {% if invoice.due_date %}<p><strong>Due Date:</strong> {{ invoice.due_date.strftime('%d %b %Y') }}</p>{% endif %}
+        </div>
+    </div>
+    <div class="invoice-details">
+        <div>
+            <h3>Billed To:</h3>
+            <p><strong>{{ invoice.user.profile.full_name or invoice.user.email }}</strong></p>
+            <p>{{ invoice.user.profile.address or 'No address on file' }}</p>
+        </div>
+        <div style="text-align: right;">
+            <h3>From:</h3>
+            <p><strong>Nieuwburg Blitz</strong></p>
+            <p>Cape Town, Western Cape, 7500</p>
+        </div>
+    </div>
+    <table class="line-items-table">
+        <thead>
+            <tr>
+                <th>Description</th>
+                <th>Quantity</th>
+                <th>Unit Price</th>
+                <th style="text-align: right;">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in invoice.line_items %}
+            <tr>
+                <td>{{ item.description|replace('\n', '<br>')|safe }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>R{{ "%.2f"|format(item.unit_price) }}</td>
+                <td style="text-align: right;">R{{ "%.2f"|format(item.amount) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="invoice-totals">
+        <div class="totals-row grand-total">
+            <span>TOTAL</span>
+            <span>R{{ "%.2f"|format(invoice.total) }}</span>
+        </div>
+    </div>
+    <div style="margin-top: 40px; text-align: center; font-size: 10px;">
+        <p>Thank you for your business!</p>
+        <p><strong>Bank Details:</strong> FNB, Cheque, 63157242222, N1 City</p>
+    </div>
+</body>
+</html>

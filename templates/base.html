@@ -1,0 +1,221 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}Nieuwburg Blitz Cleaning Services{% endblock %}</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700&family=Oswald:wght@700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav sticky">
+      <div class="nav-inner">
+        <a class="brand" href="/">
+        <img src="{{ url_for('static', filename='img/LogoBlackWithTitle.png') }}" alt="Nieuwburg Blitz Logo">
+        </a>
+        <ul class="nav-links">
+          <li><a href="/">Home</a></li>
+          <li><a href="/#services">Services</a></li>
+          <li><a href="/#about">About</a></li>
+          <li><a href="/gallery">Gallery</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="/blog">Blog</a></li>
+          <li><a href="#" id="contact-nav-link">Contact</a></li>
+        </ul>
+        <div class="nav-actions">
+  {% if current_user.is_authenticated %}
+    <!-- This block shows for LOGGED-IN users -->
+    {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
+    <div class="profile-dropdown" id="profile-dropdown">
+      <button class="profile-button-combo" id="profile-btn">
+      {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
+      {% if current_user.profile.profile_image == 'avatar_picture_profile_user_icon.png' %}
+        <img src="{{ url_for('static', filename='img/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="avatar-nav">
+      {% else %}
+        <img src="{{ url_for('static', filename='uploads/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="avatar-nav" onerror="this.onerror=null; this.src='{{ default_avatar_url }}';">
+      {% endif %}
+  <span>{{ current_user.profile.full_name or current_user.email }}</span>
+</button>
+      <div class="dropdown-content" id="dropdown-content">
+        {% if current_user.role == 'admin' %}
+          <a href="{{ url_for('admin_dashboard') }}">Admin Dashboard</a>
+        {% else %}
+          <a href="{{ url_for('client_dashboard') }}">My Dashboard</a>
+        {% endif %}
+        <a href="{{ url_for('profile') }}">Edit Profile</a>
+        <a href="{{ url_for('logout') }}">Logout</a>
+      </div>
+    </div>
+  {% else %}
+    <!-- This block shows for LOGGED-OUT users -->
+    <a href="{{ url_for('login') }}" class="cta-outline">Login</a>
+    <button class="cta" id="quote-button">Request Quote</button>
+  {% endif %}
+</div>
+      </div>
+    </nav>
+    {% block banner %}{% endblock %}
+  </header>
+
+  <main id="main">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-messages-container">
+          {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <a href="#" class="back-to-top" id="back-to-top" aria-label="Back to top">&#8679;</a>
+
+  <footer>
+    <p>&copy; {{ now.year }} Nieuwburg Blitz Cleaning Services</p>
+  </footer>
+
+  <div id="service-detail-modal" class="modal-overlay">
+    <div class="modal-content">
+      <button id="close-service-modal-button" class="modal-close" aria-label="Close service details">&times;</button>
+      <h2 id="service-modal-title">Service Details</h2>
+      <div id="service-modal-content">
+        <p>Details about the service will load here.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="contact-modal" class="modal-overlay">
+    <div class="modal-content">
+      <button id="close-contact-modal-button" class="modal-close" aria-label="Close contact form">&times;</button>
+      <h2>Contact Us</h2>
+      <p>Let us know how we can help, and we'll get back to you shortly.</p>
+      <form id="contact-form">
+        <input type="text" name="name" placeholder="Your Name" required>
+        <input type="email" name="email" placeholder="Your Email" required>
+        <textarea name="message" rows="4" placeholder="Your Message" required></textarea>
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="quote-modal" class="modal-overlay">
+    <div class="modal-content">
+      <button id="close-quote-modal-button" class="modal-close" aria-label="Close quote form">&times;</button>
+      <h2>Request a Quote</h2>
+      <p>Please provide as much detail as possible for an accurate quote.</p>
+      <form id="quote-form">
+        <div class="form-group">
+            <label for="full-name">Full Name</label>
+            <input type="text" id="full-name" name="full-name" required>
+        </div>
+        <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+        <div class="form-group">
+            <label for="phone">Phone Number</label>
+            <input type="tel" id="phone" name="phone">
+        </div>
+        <div class="form-group">
+          <label for="property-type">Property Type</label>
+          <select id="property-type" name="property-type" required>
+            <option value="">-- Select Property Type --</option>
+            <option value="Residential">Residential</option>
+            <option value="Commercial">Commercial</option>
+            <option value="Industrial">Industrial</option>
+            <option value="Body Corporate">Body Corporate</option>
+          </select>
+        </div>
+        <div id="residential-details" class="hidden">
+            <div class="form-group">
+                <label for="bedrooms">Bedrooms</label>
+                <input type="number" id="bedrooms" name="bedrooms" min="1">
+            </div>
+            <div class="form-group">
+                <label for="bathrooms">Bathrooms</label>
+                <input type="number" id="bathrooms" name="bathrooms" min="1">
+            </div>
+        </div>
+        <div id="commercial-details" class="hidden">
+            <div class="form-group">
+                <label for="square-meters">Square Meters</label>
+                <input type="number" id="square-meters" name="square-meters" min="10">
+            </div>
+        </div>
+        <div class="form-group">
+          <label for="service-frequency">How Often?</label>
+          <select id="service-frequency" name="service-frequency" required>
+            <option value="Once-Off">Once-Off Cleaning</option>
+            <option value="Recurring">Recurring Contract</option>
+          </select>
+        </div>
+        <div class="form-group hidden" id="recurring-options">
+          <label for="recurring-frequency">Frequency</label>
+          <select id="recurring-frequency" name="recurring-frequency">
+            <option value="Weekly">Weekly</option>
+            <option value="Bi-Weekly">Bi-Weekly</option>
+            <option value="Monthly">Monthly</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="primary-service">Primary Cleaning Service</label>
+          <select id="primary-service" name="primary-service" required>
+            <option value="">-- Select Main Service --</option>
+            <option value="General Cleaning">General Cleaning</option>
+            <option value="Deep Cleaning">Deep Cleaning / Spring Clean</option>
+            <option value="End-of-Tenancy">End-of-Tenancy / Move-Out</option>
+            <option value="Post-Construction">Post-Construction</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Add-on Services</label>
+            <div class="checkbox-group">
+                <label><input type="checkbox" name="addons" value="Carpet Cleaning"> Carpet Cleaning</label>
+                <label><input type="checkbox" name="addons" value="Upholstery Cleaning"> Upholstery Cleaning</label>
+                <label><input type="checkbox" name="addons" value="Interior Windows"> Interior Windows</label>
+                <label><input type="checkbox" name="addons" value="Oven Cleaning"> Oven Cleaning</label>
+                <label><input type="checkbox" name="addons" value="Fridge Cleaning"> Fridge Cleaning</label>
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="comments">Additional Information</label>
+            <textarea id="comments" name="comments" rows="3"></textarea>
+        </div>
+        <button type="submit">Get My Quote</button>
+      </form>
+    </div>
+  </div>
+  
+  <div id="delete-confirm-modal" class="modal-overlay">
+    <div class="modal-content">
+      <button id="close-delete-modal-button" class="modal-close" aria-label="Close">&times;</button>
+      <h2>Confirm Deletion</h2>
+      <p>Are you sure you want to delete your account? This action is irreversible and all your data, including booking history, will be permanently lost.</p>
+      <div class="modal-actions">
+        <button id="cancel-delete-btn" class="cta-outline">Cancel</button>
+        <button id="confirm-delete-btn" class="cta-danger">Yes, Delete My Account</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="deletion-complete-modal" class="modal-overlay simple-modal">
+    <div class="modal-content">
+      <h2>Account Deleted</h2>
+      <p>Your account has been successfully deleted.</p>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/typed.js@2.1.0/dist/typed.umd.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollToPlugin.min.js"></script>
+  <script src="{{ url_for('static', filename='js/site.js') }}"></script> </body>
+</html>
