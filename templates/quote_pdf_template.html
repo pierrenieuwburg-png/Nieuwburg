@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <title>Quote {{ quote.quote_number }}</title>
     <style>
-        /* Define fonts and basic styles */
         @page {
             size: A4;
             margin: 1.5cm;
@@ -18,12 +17,7 @@
             font-family: 'Helvetica', 'Arial', sans-serif;
             font-weight: bold;
         }
-        /* Page layout */
-        .quote-view {
-            width: 100%;
-        }
-        /* Header section with logo and title */
-        .quote-header {
+        .quote-header, .invoice-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
@@ -31,42 +25,21 @@
             padding-bottom: 20px;
             margin-bottom: 30px;
         }
-        .quote-header .logo {
-            /* Control the logo size */
+        .quote-header .logo, .invoice-header .logo {
             width: 120px;
-            height: auto;
         }
-        .quote-title {
+        .quote-title, .invoice-title {
             text-align: right;
         }
-        .quote-title h1 {
+        .quote-title h1, .invoice-title h1 {
             margin: 0;
-            color: #333;
             font-size: 36px;
-            text-transform: uppercase;
         }
-        .quote-title p {
-            margin: 2px 0 0;
-            font-size: 11px;
-        }
-        /* Client and company details */
-        .quote-details {
+        .quote-details, .invoice-details {
             display: flex;
             justify-content: space-between;
             margin-bottom: 30px;
         }
-        .quote-details h3 {
-            font-size: 12px;
-            color: #555;
-            margin: 0 0 5px 0;
-            text-transform: uppercase;
-            border-bottom: 1px solid #e0e0e0;
-            padding-bottom: 5px;
-        }
-        .quote-details p {
-            margin: 0 0 4px 0;
-        }
-        /* Table for line items */
         .line-items-table {
             width: 100%;
             border-collapse: collapse;
@@ -79,10 +52,8 @@
         }
         .line-items-table th {
             background-color: #f5f5f5;
-            font-weight: bold;
         }
-        /* Totals section */
-        .quote-totals {
+        .quote-totals, .invoice-totals {
             margin-top: 20px;
             width: 40%;
             margin-left: auto;
@@ -98,22 +69,21 @@
             background-color: #f5f5f5;
             border-top: 2px solid #333;
         }
-        /* Terms and conditions section */
         .page-break {
             page-break-before: always;
         }
-        .terms-section {
+        .terms-section-view {
             padding-top: 1cm;
         }
-        .terms-section h2 {
+        .terms-section-view h2 {
             border-bottom: 1px solid #e0e0e0;
             padding-bottom: 5px;
         }
-        .terms-section ul {
+        .terms-section-view ul {
             padding-left: 20px;
             list-style-type: decimal;
         }
-        .terms-section li {
+        .terms-section-view li {
             margin-bottom: 10px;
             line-height: 1.4;
         }
@@ -123,90 +93,6 @@
     </style>
 </head>
 <body>
-    <div class="quote-view">
-        <div class="quote-header">
-            <img src="{{ url_for('static', filename='img/LogoBlackWithTitle.png', _external=True) }}" alt="Nieuwburg Blitz Logo" class="logo">
-            <div class="quote-title">
-                <h1>QUOTE</h1>
-                <p><strong>Quote Number:</strong> {{ quote.quote_number }}</p>
-                <p><strong>Date:</strong> {{ quote.quote_date.strftime('%d %b %Y') }}</p>
-            </div>
-        </div>
-        <div class="quote-details">
-            <div>
-                <h3>Billed To:</h3>
-                <p><strong>{{ quote.user.profile.full_name or quote.user.email }}</strong></p>
-                <p>{{ quote.user.profile.address or 'No address on file' }}</p>
-                <p>{{ quote.user.email }}</p>
-            </div>
-            <div style="text-align: right;">
-                <h3>From:</h3>
-                <p><strong>Nieuwburg Blitz</strong></p>
-                <p>24 A 5, Parow Park, Balfour Street</p>
-                <p>Cape Town, Western Cape, 7500</p>
-            </div>
-        </div>
-        <table class="line-items-table">
-            <thead>
-                <tr>
-                    <th>Description</th>
-                    <th style="width: 80px;">Quantity</th>
-                    <th style="width: 100px;">Unit Price</th>
-                    <th style="width: 100px; text-align: right;">Amount</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in quote.line_items %}
-                <tr>
-                    <td>{{ item.description|replace('\n', '<br>')|safe }}</td>
-                    <td>{{ item.quantity }}</td>
-                    <td>R{{ "%.2f"|format(item.unit_price) }}</td>
-                    <td style="text-align: right;">R{{ "%.2f"|format(item.amount) }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        <div class="quote-totals">
-            <div class="totals-row">
-                <span>Subtotal</span>
-                <span>R{{ "%.2f"|format(quote.subtotal) }}</span>
-            </div>
-            <div class="totals-row grand-total">
-                <span>TOTAL</span>
-                <span>R{{ "%.2f"|format(quote.total) }}</span>
-            </div>
-        </div>
-    </div>
-
-    <div class="page-break"></div>
-    <div class="terms-section">
-        {% if quote.expiry_date %}
-        <p><strong>Quote Valid Until: {{ quote.expiry_date.strftime('%d %B %Y') }}</strong></p>
-        {% endif %}
-        <h2>Terms & Conditions</h2>
-        <ul>
-            <li><strong>Validity:</strong> This quote is valid until the date stipulated and should ideally be accepted before service expected date.</li>
-            <li><strong>Scope of Work:</strong> The quote covers only the areas listed in the quote. Additional cleaning or repairs are not included unless explicitly stated.</li>
-            <li><strong>Materials & Equipment:</strong> Nieuwburg Cleaning Services will provide all required cleaning agents and equipment unless otherwise arranged.</li>
-            <li><strong>Health & Safety:</strong> Mould or bathroom cleaning may involve specialised chemicals. Please ensure that all areas are well ventilated and cleared of sensitive materials during and after the service.</li>
-            <li><strong>Access & Preparedness:</strong> The client must ensure the team has timely access to the premises. If access is delayed by more than 15 minutes, a call-out fee of R150 may apply.</li>
-            <li><strong>Payment Terms:</strong> Full payment is due on completion of service unless otherwise arranged in writing. Accepted payment methods: EFT or cash.</li>
-            <li><strong>Cancellations:</strong> Cancellations made with less than 24 hours' notice may incur a forfeit of deposit.</li>
-            <li><strong>Guarantee & Limitations:</strong> While every effort will be made to deliver a high standard of cleaning, results such as mould removal may vary due to underlying conditions (e.g. damp or structural issues). No guarantee of permanent results is offered unless the cause is resolved.</li>
-            <li>The above is an estimated duration for the cleaning and the actual time required may vary depending on the comprehensive scope of work and condition of the unit. Should the work be required to be extended beyond the minimum estimated time, additional cleaning time may need to be scheduled upon approval.</li>
-            <li>This service requires a 50% deposit 24 hours before date scheduled in order to secure slot.</li>
-            <li>All terms are agreed unless otherwise specified by both the client and service provider.</li>
-        </ul>
-        <div class="bank-details">
-            <h3>Bank Details:</h3>
-            <p><strong>Account Name:</strong> Nieuwburg Pty (ltd)<br>
-            <strong>Bank Name:</strong> First National Bank<br>
-            <strong>Account Number:</strong> 63157242222<br>
-            <strong>Account:</strong> Cheque<br>
-            <strong>Branch Name:</strong> N1 City<br>
-            <strong>Branch Code:</strong> 260217</p>
-        </div>
-        <p>For any questions regarding this quote, please contact us at hello@nieuwburg.co.za or 0826184424.</p>
-    </div>
+    {% include '_view.html' with doc_type='Quote', document=quote %}
 </body>
 </html>

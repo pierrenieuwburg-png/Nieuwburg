@@ -403,7 +403,14 @@ if (serviceTiles) {
     // Handle the final deletion
 confirmDeleteBtn.addEventListener('click', async () => {
   try {
-    const response = await fetch('/delete_account', { method: 'POST' });
+    const csrfToken = '{{ csrf_token() }}'; // This will be rendered by Jinja2
+    const response = await fetch('/delete_account', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrfToken
+    }
+});
     const result = await response.json();
 
     if (result.status === 'ok') {

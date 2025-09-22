@@ -42,12 +42,8 @@
 <td>{{ staff.profile.full_name or 'N/A' }}</td>
 <td>{{ staff.email or 'N/A' }}</td>
 <td>{{ staff.profile.phone_number or 'N/A' }}</td>
-<td>{{ item.age or 'N/A' }}</td> <td class="action-buttons">
+<td>{{ item.age or 'N/A' }}</td> <td>
     <a href="{{ url_for('admin_view_staff', user_id=staff.id) }}" class="cta-outline-small">View</a>
-    <a href="{{ url_for('admin_edit_staff', user_id=staff.id) }}" class="cta-outline-small">Edit</a>
-    <form action="{{ url_for('admin_delete_staff', user_id=staff.id) }}" method="POST" onsubmit="return confirm('Are you sure?');">
-        <button type="submit" class="cta-danger-small">Delete</button>
-    </form>
 </td>
 </tr>
 {% else %}
