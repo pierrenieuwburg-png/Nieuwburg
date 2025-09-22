@@ -9,7 +9,7 @@
 
 <div class="admin-section">
     <h2>Schedule Overview</h2>
-    <div id="calendar" style="max-width: 1100px; margin: 0 auto;"></div>
+    <div id="calendar" style="max-width: 1100px; margin: 0 auto;" data-events='{{ events_json | safe }}'></div>
 </div>
 
 <div class="admin-section">
@@ -47,9 +47,14 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.13/index.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.13/index.global.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     var calendarEl = document.getElementById('calendar');
+    
+    // 1. Get the JSON data from the 'data-events' attribute
+    var eventsData = JSON.parse(calendarEl.dataset.events || '[]');
+
     var calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'dayGridMonth',
         headerToolbar: {
@@ -57,9 +62,10 @@ document.addEventListener('DOMContentLoaded', function() {
             center: 'title',
             right: 'dayGridMonth,timeGridWeek,dayGridDay'
         },
-        events: {{ events_json | safe }},
+        // 2. Use the parsed data here
+        events: eventsData,
         height: 'auto',
-        dayMaxEvents: true // To prevent overlapping
+        dayMaxEvents: true
     });
     calendar.render();
 });
