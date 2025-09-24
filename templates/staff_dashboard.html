@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}My Schedule - Nieuwburg Blitz{% endblock %}
+
+{% block content %}
+<section class="container bookings-page">
+    <div class="profile-header">
+        <div class="profile-header-info">
+            <h1>My Schedule</h1>
+        </div>
+        <div class="profile-header-actions">
+            <a href="{{ url_for('profile') }}" class="cta-outline">Edit My Profile</a>
+        </div>
+    </div>
+
+    <div class="admin-section" style="margin-top: 30px;">
+        <h2 style="text-align: left; margin-top: 0;">Upcoming Jobs</h2>
+        <div class="bookings-list">
+        {% if upcoming_jobs %}
+            {% for job in upcoming_jobs %}
+            <div class="booking-item">
+                <div class="booking-details">
+                    <span class="booking-date"><strong>{{ job.scheduled_date.strftime('%A, %d %b %Y') }}</strong></span>
+                    <span class="booking-status status-scheduled">{{ job.start_time.strftime('%H:%M') if job.start_time else 'All Day' }}</span>
+                </div>
+                <div class="booking-info" style="margin-top: 15px;">
+                    <p><strong>Client:</strong> {{ job.quote_request.user.profile.full_name }}</p>
+                    <p><strong>Address:</strong> {{ job.quote_request.user.profile.address }}</p>
+                    <p><strong>Service:</strong> {{ job.quote_request.primary_service }}</p>
+                    <p><strong>Team:</strong> {{ job.assigned_staff|map(attribute='profile.full_name')|join(', ') }}</p>
+                    {% if job.notes %}
+                    <hr style="margin: 10px 0;">
+                    <p><strong>Notes:</strong><br>{{ job.notes|replace('\n', '<br>')|safe }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p>You have no upcoming jobs scheduled.</p>
+        {% endif %}
+        </div>
+    </div>
+
+    <div class="admin-section" style="margin-top: 40px;">
+        <h2 style="text-align: left; margin-top: 0;">Past Jobs</h2>
+        <div class="bookings-list">
+        {% if past_jobs %}
+            {% for job in past_jobs %}
+            <div class="booking-item" style="border-color: #ddd;">
+                <div class="booking-details">
+                    <span class="booking-date">{{ job.scheduled_date.strftime('%A, %d %b %Y') }}</span>
+                    <span class="booking-status status-completed">{{ job.status }}</span>
+                </div>
+                <div class="booking-info">
+                    <p><strong>Client:</strong> {{ job.quote_request.user.profile.full_name }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p>You have no past job history.</p>
+        {% endif %}
+        </div>
+    </div>
+</section>
+{% endblock %}

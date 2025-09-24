@@ -19,25 +19,26 @@
   {% endwith %}
 
   <form method="POST" class="profile-form" style="max-width: 600px; margin: 0;">
-      {{ form.hidden_tag() }} <div class="form-group">
+      {{ form.hidden_tag() }}
+      <div class="form-group">
           {{ form.full_name.label }}
-          {{ form.full_name() }}
+          {{ form.full_name(class="form-control") }}
       </div>
       <div class="form-group">
           {{ form.email.label }}
-          {{ form.email() }}
+          {{ form.email(class="form-control") }}
       </div>
       <div class="form-group">
           {{ form.phone_number.label }}
-          {{ form.phone_number() }}
+          {{ form.phone_number(class="form-control") }}
       </div>
       <div class="form-group">
           {{ form.address.label }}
-          {{ form.address(rows=3) }}
+          {{ form.address(rows=3, class="form-control") }}
       </div>
       <div class="form-group">
-          {{ form.id_number.label }} (13 digits)
-          {{ form.id_number(maxlength=13) }}
+          {{ form.id_number.label }}
+          {{ form.id_number(maxlength=13, class="form-control") }}
       </div>
       
       {{ form.submit(class="cta") }}

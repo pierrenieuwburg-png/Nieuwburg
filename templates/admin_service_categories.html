@@ -1,0 +1,41 @@
+{% extends "admin_base.html" %}
+{% block title %}Manage Service Categories{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+    <h1>Service & Pricing Categories</h1>
+    <a href="{{ url_for('admin_add_service_category') }}" class="cta">Add New Category</a>
+</div>
+
+<div class="admin-section">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Category Name</th>
+                <th>Pricing Method</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cat in categories %}
+            <tr>
+                <td><strong>{{ cat.name }}</strong><br><small style="color: #666;">{{ cat.description }}</small></td>
+                <td>{{ cat.calculation_method.replace('_', ' ')|title }}</td>
+                <td class="action-buttons">
+                    <a href="{{ url_for('admin_manage_category_items', category_id=cat.id) }}" class="cta-outline-small">Manage Items</a>
+                    <a href="{{ url_for('admin_edit_service_category', category_id=cat.id) }}" class="cta-outline-small">Edit</a>
+                    <form action="{{ url_for('admin_delete_service_category', category_id=cat.id) }}" method="POST" onsubmit="return confirm('Are you sure? This will delete the category and all items within it.');" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="cta-danger-small">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="3" style="text-align: center; padding: 20px;">No service categories have been created yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

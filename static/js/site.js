@@ -49,80 +49,98 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  // --- NEW: Typed.js Hero Animation ---
-if (document.getElementById('typed-text')) {
-  const typed = new Typed('#typed-text', {
-    strings: ['Homes.', 'Offices.', 'End of Tenancy.', 'Post-Construction.'],
-    typeSpeed: 70,
-    backSpeed: 50,
-    loop: true,
-    backDelay: 2000,
-  });
+  // --- NEW: Booking Modal Logic ---
+const bookingModal = document.getElementById('booking-modal');
+if (bookingModal) {
+    const openButtons = ['book-service-btn', 'process-quote-button', 'dashboard-quote-btn', 'quote-button'];
+    const closeButton = document.getElementById('close-booking-modal-button');
+    let calculatorInitialized = false; // Prevents re-loading data
 
-  // --- NEW: Service Tile Backgrounds ---
-const serviceTiles = document.querySelectorAll('.service-tile');
-if (serviceTiles) {
-    // Create an object to map your services to your new images
-    const serviceImages = {
-        residential: 'Residential.jpg', // Replace with your residential image
-        commercial: 'Commercial.jpg',  // Replace with your commercial image
-        deep: 'DeepClean.jpg',         // Replace with your deep clean image
-        tenancy: 'End_of_tenancy.jpg'     // Replace with your tenancy image
+    const openBookingModal = (e) => {
+        e.preventDefault();
+        bookingModal.classList.add('visible');
+        // Only initialize the calculator the very first time the modal is opened
+        if (!calculatorInitialized) {
+            initBookingCalculator();
+            calculatorInitialized = true;
+        }
     };
- 
-    serviceTiles.forEach(tile => {
-        const service = tile.dataset.service;
-        // Use the image from the map, or a default if one isn't found
-        const imageName = serviceImages[service] || 'default_image.jpg';
-        tile.style.backgroundImage = `url(/static/img/${imageName})`;
+
+    
+    const closeBookingModal = () => {
+        bookingModal.classList.remove('visible');
+    };
+
+    openButtons.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', openBookingModal);
+    });
+
+    if (closeButton) closeButton.addEventListener('click', closeBookingModal);
+    bookingModal.addEventListener('click', (e) => {
+        if (e.target === bookingModal) closeBookingModal();
     });
 }
 
-}
+  // --- NEW: Typed.js Hero Animation ---
+  if (document.getElementById('typed-text')) {
+    const typed = new Typed('#typed-text', {
+      strings: ['Homes.', 'Offices.', 'End of Tenancy.', 'Post-Construction.'],
+      typeSpeed: 70,
+      backSpeed: 50,
+      loop: true,
+      backDelay: 2000,
+    });
+  }
+
+  // --- NEW: Service Tile Backgrounds ---
+  const serviceTiles = document.querySelectorAll('.service-tile');
+  if (serviceTiles) {
+      const serviceImages = {
+          residential: 'Residential.jpg',
+          commercial: 'Commercial.jpg',
+          deep: 'DeepClean.jpg',
+          tenancy: 'End_of_tenancy.jpg'
+      };
+      serviceTiles.forEach(tile => {
+          const service = tile.dataset.service;
+          const imageName = serviceImages[service] || 'default_image.jpg';
+          tile.style.backgroundImage = `url(/static/img/${imageName})`;
+      });
+  }
 
   // --- Reusable Modal Logic ---
   const setupModal = (modalId, openButtonIds, closeButtonId, formId, submissionHandler) => {
     const modal = document.getElementById(modalId);
     if (!modal) return;
 
-    // Use a custom event to close the modal to avoid listener conflicts
-    modal.addEventListener('close', closeModal);
-
-    const modalContent = modal.querySelector('.modal-content');
-    const originalModalHTML = modalContent ? modalContent.innerHTML : '';
+    const attachFormListeners = () => {
+        const form = document.getElementById(formId);
+        if (form && submissionHandler) {
+            form.removeEventListener('submit', submissionHandler);
+            form.addEventListener('submit', submissionHandler);
+            if (formId === 'quote-form') {
+                const propType = document.getElementById('property-type');
+                const freq = document.getElementById('service-frequency');
+                if(propType) propType.addEventListener('change', handlePropertyTypeChange);
+                if(freq) freq.addEventListener('change', handleFrequencyChange);
+            }
+        }
+    };
 
     function openModal(e) {
-      e.preventDefault();
+      if (e) e.preventDefault();
       modal.classList.add('visible');
+      attachFormListeners();
     }
 
     function closeModal() {
       modal.classList.remove('visible');
-      setTimeout(() => {
-        if (modalContent) {
-          modalContent.innerHTML = originalModalHTML;
-          // Re-attach listeners after rebuilding HTML
-          const newCloseButton = document.getElementById(closeButtonId);
-          if (newCloseButton) newCloseButton.addEventListener('click', closeModal);
-          
-          const newForm = document.getElementById(formId);
-          if (newForm && submissionHandler) {
-              newForm.addEventListener('submit', submissionHandler);
-              // Special handling for quote form's dynamic selects
-              if (formId === 'quote-form') {
-                  const propType = document.getElementById('property-type');
-                  const freq = document.getElementById('service-frequency');
-                  if(propType) propType.addEventListener('change', handlePropertyTypeChange);
-                  if(freq) freq.addEventListener('change', handleFrequencyChange);
-              }
-          }
-        }
-      }, 300); // Match CSS transition time
     }
-
+    
     openButtonIds.forEach(id => {
-      const openButton = document.getElementById(id);
-      if (openButton) openButton.addEventListener('click', openModal);
+      const button = document.getElementById(id);
+      if(button) button.addEventListener('click', openModal);
     });
 
     const closeButton = document.getElementById(closeButtonId);
@@ -132,23 +150,12 @@ if (serviceTiles) {
       if (e.target === modal) closeModal();
     });
 
-    const form = document.getElementById(formId);
-    if (form && submissionHandler) {
-      form.addEventListener('submit', submissionHandler);
-    }
-    
-    // Attach handlers for quote form if it exists
-    if (formId === 'quote-form') {
-        const propType = document.getElementById('property-type');
-        const freq = document.getElementById('service-frequency');
-        if(propType) propType.addEventListener('change', handlePropertyTypeChange);
-        if(freq) freq.addEventListener('change', handleFrequencyChange);
-    }
+    attachFormListeners();
   };
 
   // --- Initialize Modals ---
-  setupModal('contact-modal', ['contact-nav-link'], 'close-contact-modal-button', 'contact-form', handleContactFormSubmit);
-  setupModal('quote-modal', ['quote-button', 'process-quote-button'], 'close-quote-modal-button', 'quote-form', handleQuoteFormSubmit);
+setupModal('contact-modal', ['contact-nav-link'], 'close-contact-modal-button', 'contact-form', handleContactFormSubmit);
+setupModal('join-team-modal', ['join-team-btn'], 'close-join-team-modal-button', 'staff-application-form', handleStaffApplicationSubmit);
   
   // --- Navbar Scroll Logic ---
   const nav = document.querySelector('.nav');
@@ -243,7 +250,7 @@ if (serviceTiles) {
                 duration: 1,
                 scrollTo: {
                     y: targetElement,
-                    offsetY: 0 // Adjust for your sticky nav
+                    offsetY: 0
                 },
                 ease: "power2.easeOut"
             });
@@ -304,11 +311,8 @@ if (serviceTiles) {
           }, 3.5);
       }
   }
-
-  // Initialize the animation when the DOM is ready
   initProcessAnimation();
   
-
   // --- Testimonial Slider Logic ---
   const testimonialSlider = document.querySelector('.testimonial-slider');
   if (testimonialSlider) {
@@ -355,7 +359,8 @@ if (serviceTiles) {
     
     startSlider();
   }
-// --- Back to Top Button Logic ---
+  
+  // --- Back to Top Button Logic ---
   const toTopButton = document.getElementById('back-to-top');
   if (toTopButton) {
     window.addEventListener('scroll', () => {
@@ -380,75 +385,90 @@ if (serviceTiles) {
   const closeDeleteModalBtn = document.getElementById('close-delete-modal-button');
   const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
   const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
-  
-  if (deleteBtn && deleteModal) {
-    // Open the confirmation modal
+
+  if (deleteBtn && deleteModal && confirmDeleteBtn) {
+    // This listener is for the initial "Delete Profile" button on the dashboard.
+    // Its only job is to open the confirmation modal.
     deleteBtn.addEventListener('click', (e) => {
-      e.preventDefault();
+      e.preventDefault(); // Prevent any default button behavior
       deleteModal.classList.add('visible');
     });
 
-    // Function to close the modal
-    const closeDeleteModal = () => {
-      deleteModal.classList.remove('visible');
-    };
-    
-    // Attach close event to buttons and overlay
-    closeDeleteModalBtn.addEventListener('click', closeDeleteModal);
-    cancelDeleteBtn.addEventListener('click', closeDeleteModal);
-    deleteModal.addEventListener('click', (e) => {
-      if (e.target === deleteModal) closeDeleteModal();
-    });
-
-    // Handle the final deletion
+    // This listener is for the final "Yes, Delete My Account" button inside the modal.
+    // This is the only place where the account deletion is triggered.
+    // This listener is for the final "Yes, Delete My Account" button inside the modal.
+// This is the only place where the account deletion is triggered.
 confirmDeleteBtn.addEventListener('click', async () => {
   try {
-    const csrfToken = '{{ csrf_token() }}'; // This will be rendered by Jinja2
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    
     const response = await fetch('/delete_account', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRFToken': csrfToken
-    }
-});
+      }
+    });
+    
     const result = await response.json();
 
     if (result.status === 'ok') {
       const completionModal = document.getElementById('deletion-complete-modal');
-      completionModal.classList.add('visible');
+      if (completionModal) {
+        closeDeleteModal(); // Close the confirmation modal first
+        completionModal.classList.add('visible'); // Show the final success message
+        
+        const closeCompletionModal = () => {
+          completionModal.classList.remove('visible');
+          setTimeout(() => { window.location.href = '/'; }, 400);
+        };
 
-      // Function to close the modal and redirect
-const closeCompletionModal = () => {
-  completionModal.classList.remove('visible');
-  // Wait for the 300ms fade-out animation to finish before redirecting
-  setTimeout(() => {
-    window.location.href = '/'; // Redirect to homepage
-  }, 300); 
-};
+        const redirectTimeout = setTimeout(closeCompletionModal, 5000);
 
-      // Set a timeout to automatically close and redirect
-      const redirectTimeout = setTimeout(closeCompletionModal, 8000);
+        // This is the updated "click outside" listener
+        const handleOutsideClick = (e) => {
+          console.log("Overlay clicked. Target is:", e.target); // Debugging line
+          if (e.target === completionModal) {
+            clearTimeout(redirectTimeout);
+            closeCompletionModal();
+            // IMPORTANT: Remove the listener after it's used
+            completionModal.removeEventListener('click', handleOutsideClick);
+          }
+        };
 
-      // Allow clicking the overlay to close it sooner
-      completionModal.addEventListener('click', (e) => {
-        if (e.target === completionModal) {
-          clearTimeout(redirectTimeout); // Stop the automatic redirect
-          closeCompletionModal();
-        }
-      });
+        completionModal.addEventListener('click', handleOutsideClick);
+        console.log("Click-outside listener attached to deletion-complete-modal."); // Debugging line
+      }
+    } else {
+      alert('Deletion failed: ' + (result.message || 'Unknown error.'));
+      closeDeleteModal();
     }
   } catch (error) {
     console.error('Deletion error:', error);
     alert('An error occurred. Could not delete account.');
   }
 });
+
+    // --- Listeners to close the confirmation modal without deleting ---
+    const closeDeleteModal = () => {
+      deleteModal.classList.remove('visible');
+    };
+    
+    if (closeDeleteModalBtn) closeDeleteModalBtn.addEventListener('click', closeDeleteModal);
+    if (cancelDeleteBtn) cancelDeleteBtn.addEventListener('click', closeDeleteModal);
+    
+    deleteModal.addEventListener('click', (e) => {
+      if (e.target === deleteModal) closeDeleteModal();
+    });
   }
+  initBookingCalculator();
 });
 
 // --- FORM HANDLERS ---
 async function handleContactFormSubmit(e) {
   e.preventDefault();
   const form = e.target;
+  const modal = document.getElementById('contact-modal');
   const modalContent = form.parentElement;
   
   const data = { name: form.name.value, email: form.email.value, message: form.message.value };
@@ -467,11 +487,10 @@ async function handleContactFormSubmit(e) {
             <p style="text-align: center; font-size: 1.1rem; color: var(--accent); padding: 40px 0;">${json.message}</p>
         `;
         const newCloseButton = modalContent.querySelector('#close-contact-modal-button');
-        if (newCloseButton) {
-            newCloseButton.addEventListener('click', () => document.getElementById('contact-modal').dispatchEvent(new Event('close')));
+        if (newCloseButton && modal) {
+            newCloseButton.addEventListener('click', () => modal.classList.remove('visible'));
         }
     }
-    
   } catch (error) {
      console.error("Contact form submission error:", error);
   }
@@ -480,7 +499,6 @@ async function handleContactFormSubmit(e) {
 async function handleQuoteFormSubmit(e) {
   e.preventDefault();
   const form = e.target;
-  const modalContent = form.parentElement;
   
   const formData = new FormData(form);
   const data = {};
@@ -495,26 +513,63 @@ async function handleQuoteFormSubmit(e) {
   data.addons = addons;
 
   try {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
       const res = await fetch('/api/quote', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+              'Content-Type': 'application/json',
+              'X-CSRFToken': csrfToken
+          },
           body: JSON.stringify(data)
       });
       const json = await res.json();
 
-      if (modalContent) {
-        modalContent.innerHTML = `
-            <button id="close-quote-modal-button" class="modal-close" aria-label="Close quote form">&times;</button>
-            <p style="text-align: center; font-size: 1.1rem; color: var(--accent); padding: 40px 0;">${json.message}</p>
-        `;
-        const newCloseButton = modalContent.querySelector('#close-quote-modal-button');
-        if (newCloseButton) {
-            newCloseButton.addEventListener('click', () => document.getElementById('quote-modal').dispatchEvent(new Event('close')));
-        }
+      if (res.ok) {
+        location.reload();
+      } else {
+        alert(json.message || 'An error occurred. Please try again.');
       }
   } catch (error) {
       console.error("Quote form submission error:", error);
+      alert('A network error occurred. Please try again.');
   }
+}
+
+async function handleStaffApplicationSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const modal = document.getElementById('join-team-modal');
+    const modalContent = form.parentElement;
+
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+
+    try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        const res = await fetch('/api/staff_apply', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify(data)
+        });
+        const json = await res.json();
+
+        if (modalContent) {
+            modalContent.innerHTML = `
+                <button id="close-join-team-modal-button" class="modal-close" aria-label="Close form">&times;</button>
+                <p style="text-align: center; font-size: 1.1rem; color: var(--accent); padding: 40px 0;">${json.message}</p>
+            `;
+            const newCloseButton = modalContent.querySelector('#close-join-team-modal-button');
+            if (newCloseButton && modal) {
+                newCloseButton.addEventListener('click', () => modal.classList.remove('visible'));
+            }
+        }
+    } catch (error) {
+        console.error("Staff application submission error:", error);
+        alert('An unexpected error occurred. Please try again.');
+    }
 }
 
 // --- QUOTE FORM CONDITIONAL LOGIC ---
@@ -568,4 +623,92 @@ async function loadPosts() {
     container.innerHTML = '<p style="color: red;">Failed to load posts.</p>';
     console.error("Blog loading error:", e);
   }
+}
+
+// --- BOOKING CALCULATOR ---
+async function initBookingCalculator() {
+    const container = document.getElementById('booking-calculator-content');
+    if (!container) return;
+
+    try {
+        const response = await fetch('/api/services');
+        const categories = await response.json();
+        
+        let formHtml = '<form id="booking-calculator-form" class="booking-calculator-form">';
+        formHtml += `
+            <div class="booking-category">
+                <h3>Select Frequency</h3>
+                <select id="booking-frequency" name="frequency" class="form-control">
+                    <option value="Once-Off">Once-Off</option>
+                    <option value="Weekly">Weekly</option>
+                    <option value="Bi-Weekly">Bi-Weekly</option>
+                    <option value="Monthly">Monthly</option>
+                </select>
+            </div>
+        `;
+
+        categories.forEach(cat => {
+            formHtml += `<div class="booking-category"><h3>${cat.name}</h3>`;
+            if (cat.description) formHtml += `<p style="font-size: 0.9rem; color: #666;">${cat.description}</p>`;
+
+            cat.items.forEach(item => {
+                formHtml += `<div class="booking-item-row" data-item-id="${item.id}">`;
+                
+                if (cat.calculation_method === 'quantity') {
+                    formHtml += `<label for="item-${item.id}">${item.name}</label>`;
+                    formHtml += `<input type="number" id="item-${item.id}" name="item_${item.id}" class="quantity-input" min="0" value="0" data-item-type="quantity">`;
+                } else if (cat.calculation_method === 'options') {
+                    formHtml += `<label for="item-${item.id}">${item.name}</label>`;
+                    formHtml += `<input type="checkbox" id="item-${item.id}" name="item_${item.id}" data-item-type="option">`;
+                }
+                
+                formHtml += `</div>`;
+            });
+            formHtml += `</div>`;
+        });
+
+        formHtml += '</form>';
+        container.innerHTML = formHtml;
+
+        // --- Calculation Logic ---
+        const form = document.getElementById('booking-calculator-form');
+        const priceTotalEl = document.getElementById('booking-price-total');
+        const timeTotalEl = document.getElementById('booking-time-total');
+
+        const calculateTotal = () => {
+            let totalPrice = 0;
+            let totalTime = 0;
+            const selectedFrequency = document.getElementById('booking-frequency').value;
+
+            const inputs = form.querySelectorAll('input[data-item-type]');
+            
+            inputs.forEach(input => {
+                const itemId = input.closest('.booking-item-row').dataset.itemId;
+                const category = categories.find(c => c.items.some(i => i.id == itemId));
+                const item = category.items.find(i => i.id == itemId);
+                const priceInfo = item.prices.find(p => p.frequency === selectedFrequency);
+                
+                if (priceInfo) {
+                    if (input.type === 'number' && input.value > 0) {
+                        totalPrice += input.value * priceInfo.price;
+                        totalTime += input.value * item.estimated_time_mins;
+                    } else if (input.type === 'checkbox' && input.checked) {
+                        totalPrice += priceInfo.price;
+                        totalTime += item.estimated_time_mins;
+                    }
+                }
+            });
+            
+            priceTotalEl.textContent = `R${totalPrice.toFixed(2)}`;
+            timeTotalEl.textContent = `${totalTime} mins`;
+        };
+        
+        form.addEventListener('change', calculateTotal);
+        form.addEventListener('keyup', calculateTotal);
+        calculateTotal(); // Initial calculation
+
+    } catch (error) {
+        container.innerHTML = '<p style="color: red; text-align: center;">Error loading services. Please try again later.</p>';
+        console.error("Booking calculator error:", error);
+    }
 }

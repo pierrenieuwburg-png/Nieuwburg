@@ -4,6 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}Nieuwburg Blitz Cleaning Services{% endblock %}</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,35 +30,35 @@
           <li><a href="#" id="contact-nav-link">Contact</a></li>
         </ul>
         <div class="nav-actions">
-  {% if current_user.is_authenticated %}
-    <!-- This block shows for LOGGED-IN users -->
-    {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
-    <div class="profile-dropdown" id="profile-dropdown">
-      <button class="profile-button-combo" id="profile-btn">
-      {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
-      {% if current_user.profile.profile_image == 'avatar_picture_profile_user_icon.png' %}
-        <img src="{{ url_for('static', filename='img/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="avatar-nav">
-      {% else %}
-        <img src="{{ url_for('static', filename='uploads/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="avatar-nav" onerror="this.onerror=null; this.src='{{ default_avatar_url }}';">
-      {% endif %}
-  <span>{{ current_user.profile.full_name or current_user.email }}</span>
-</button>
-      <div class="dropdown-content" id="dropdown-content">
-        {% if current_user.role == 'admin' %}
-          <a href="{{ url_for('admin_dashboard') }}">Admin Dashboard</a>
-        {% else %}
-          <a href="{{ url_for('client_dashboard') }}">My Dashboard</a>
-        {% endif %}
-        <a href="{{ url_for('profile') }}">Edit Profile</a>
-        <a href="{{ url_for('logout') }}">Logout</a>
-      </div>
-    </div>
-  {% else %}
-    <!-- This block shows for LOGGED-OUT users -->
-    <a href="{{ url_for('login') }}" class="cta-outline">Login</a>
-    <button class="cta" id="quote-button">Request Quote</button>
-  {% endif %}
-</div>
+          {% if current_user.is_authenticated %}
+            {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
+            <div class="profile-dropdown" id="profile-dropdown">
+              <button class="profile-button-combo" id="profile-btn">
+              {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
+              {% if current_user.profile.profile_image == 'avatar_picture_profile_user_icon.png' %}
+              <img src="{{ url_for('static', filename='img/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="avatar-nav default-avatar">
+              {% else %}
+              <img src="{{ url_for('static', filename='uploads/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="avatar-nav" onerror="this.onerror=null; this.src='{{ default_avatar_url }}';">
+              {% endif %}
+          <span>{{ current_user.profile.full_name or current_user.email }}</span>
+        </button>
+              <div class="dropdown-content" id="dropdown-content">
+                {% if current_user.role == 'admin' %}
+                  <a href="{{ url_for('admin_dashboard') }}">Admin Dashboard</a>
+                  {% elif current_user.role == 'staff' %}
+                  <a href="{{ url_for('staff_dashboard') }}">My Schedule</a>
+                {% else %}
+                  <a href="{{ url_for('client_dashboard') }}">My Dashboard</a>
+                {% endif %}
+                <a href="{{ url_for('profile') }}">Edit Profile</a>
+                <a href="{{ url_for('logout') }}">Logout</a>
+              </div>
+            </div>
+          {% else %}
+            <a href="{{ url_for('login') }}" class="cta-outline">Login</a>
+            <button class="cta" id="quote-button">Book a Service</button>
+          {% endif %}
+        </div>
       </div>
     </nav>
     {% block banner %}{% endblock %}
@@ -79,8 +80,9 @@
   <a href="#" class="back-to-top" id="back-to-top" aria-label="Back to top">&#8679;</a>
 
   <footer>
+    <button class="cta-outline" id="join-team-btn" style="margin-bottom: 20px;">Join Our Team</button>
     <p>&copy; {{ now.year }} Nieuwburg Blitz Cleaning Services</p>
-  </footer>
+</footer>
 
   <div id="service-detail-modal" class="modal-overlay">
     <div class="modal-content">
@@ -106,93 +108,30 @@
     </div>
   </div>
 
-  <div id="quote-modal" class="modal-overlay">
-    <div class="modal-content">
-      <button id="close-quote-modal-button" class="modal-close" aria-label="Close quote form">&times;</button>
-      <h2>Request a Quote</h2>
-      <p>Please provide as much detail as possible for an accurate quote.</p>
-      <form id="quote-form">
-        <div class="form-group">
-            <label for="full-name">Full Name</label>
-            <input type="text" id="full-name" name="full-name" required>
-        </div>
-        <div class="form-group">
-            <label for="email">Email</label>
-            <input type="email" id="email" name="email" required>
-        </div>
-        <div class="form-group">
-            <label for="phone">Phone Number</label>
-            <input type="tel" id="phone" name="phone">
-        </div>
-        <div class="form-group">
-          <label for="property-type">Property Type</label>
-          <select id="property-type" name="property-type" required>
-            <option value="">-- Select Property Type --</option>
-            <option value="Residential">Residential</option>
-            <option value="Commercial">Commercial</option>
-            <option value="Industrial">Industrial</option>
-            <option value="Body Corporate">Body Corporate</option>
-          </select>
-        </div>
-        <div id="residential-details" class="hidden">
-            <div class="form-group">
-                <label for="bedrooms">Bedrooms</label>
-                <input type="number" id="bedrooms" name="bedrooms" min="1">
-            </div>
-            <div class="form-group">
-                <label for="bathrooms">Bathrooms</label>
-                <input type="number" id="bathrooms" name="bathrooms" min="1">
-            </div>
-        </div>
-        <div id="commercial-details" class="hidden">
-            <div class="form-group">
-                <label for="square-meters">Square Meters</label>
-                <input type="number" id="square-meters" name="square-meters" min="10">
-            </div>
-        </div>
-        <div class="form-group">
-          <label for="service-frequency">How Often?</label>
-          <select id="service-frequency" name="service-frequency" required>
-            <option value="Once-Off">Once-Off Cleaning</option>
-            <option value="Recurring">Recurring Contract</option>
-          </select>
-        </div>
-        <div class="form-group hidden" id="recurring-options">
-          <label for="recurring-frequency">Frequency</label>
-          <select id="recurring-frequency" name="recurring-frequency">
-            <option value="Weekly">Weekly</option>
-            <option value="Bi-Weekly">Bi-Weekly</option>
-            <option value="Monthly">Monthly</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="primary-service">Primary Cleaning Service</label>
-          <select id="primary-service" name="primary-service" required>
-            <option value="">-- Select Main Service --</option>
-            <option value="General Cleaning">General Cleaning</option>
-            <option value="Deep Cleaning">Deep Cleaning / Spring Clean</option>
-            <option value="End-of-Tenancy">End-of-Tenancy / Move-Out</option>
-            <option value="Post-Construction">Post-Construction</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>Add-on Services</label>
-            <div class="checkbox-group">
-                <label><input type="checkbox" name="addons" value="Carpet Cleaning"> Carpet Cleaning</label>
-                <label><input type="checkbox" name="addons" value="Upholstery Cleaning"> Upholstery Cleaning</label>
-                <label><input type="checkbox" name="addons" value="Interior Windows"> Interior Windows</label>
-                <label><input type="checkbox" name="addons" value="Oven Cleaning"> Oven Cleaning</label>
-                <label><input type="checkbox" name="addons" value="Fridge Cleaning"> Fridge Cleaning</label>
-            </div>
-        </div>
-        <div class="form-group">
-            <label for="comments">Additional Information</label>
-            <textarea id="comments" name="comments" rows="3"></textarea>
-        </div>
-        <button type="submit">Get My Quote</button>
-      </form>
+  <div id="booking-modal" class="modal-overlay">
+  <div class="modal-content" style="max-width: 700px;">
+    <button id="close-booking-modal-button" class="modal-close" aria-label="Close booking form">&times;</button>
+    <h2>Book a Service</h2>
+    <p>Build your custom cleaning service below. The price will update automatically.</p>
+
+    <div id="booking-calculator-content">
+      <p style="text-align: center; padding: 40px 0;">Loading services...</p>
     </div>
+
+    <div class="booking-summary">
+      <div class="summary-item">
+        <span>Estimated Time</span>
+        <strong id="booking-time-total">0 mins</strong>
+      </div>
+      <div class="summary-item total">
+        <span>Estimated Total</span>
+        <strong id="booking-price-total">R0.00</strong>
+      </div>
+    </div>
+
+    <button class="cta" id="booking-next-step-btn" style="width: 100%; margin-top: 20px;">Next: Choose Date & Time</button>
   </div>
+</div>
   
   <div id="delete-confirm-modal" class="modal-overlay">
     <div class="modal-content">
@@ -212,6 +151,39 @@
       <p>Your account has been successfully deleted.</p>
     </div>
   </div>
+
+  <div id="join-team-modal" class="modal-overlay">
+    <div class="modal-content">
+      <button id="close-join-team-modal-button" class="modal-close" aria-label="Close form">&times;</button>
+      <h2>Join the Blitz Team</h2>
+      <p>If you're reliable, professional, and have a passion for cleaning, we'd love to hear from you.</p>
+      <form id="staff-application-form">
+        <div class="form-group">
+            <label for="apply-full-name">Full Name</label>
+            <input type="text" id="apply-full-name" name="full_name" required>
+        </div>
+        <div class="form-group">
+            <label for="apply-age">Age</label>
+            <input type="number" id="apply-age" name="age" required>
+        </div>
+        <div class="form-group">
+            <label for="apply-phone">Cellphone Number</label>
+            <input type="tel" id="apply-phone" name="phone_number" required>
+        </div>
+        <div class="form-group">
+            <label for="apply-email">Email Address</label>
+            <input type="email" id="apply-email" name="email" required>
+        </div>
+        <div class="form-group">
+            <label for="apply-address">Home Address</label>
+            <textarea id="apply-address" name="address" rows="3"></textarea>
+        </div>
+        <button type="submit">Submit Application</button>
+      </form>
+    </div>
+</div>
+
+<script src="https://unpkg.com/typed.js@2.1.0/dist/typed.umd.js"></script>
 
   <script src="https://unpkg.com/typed.js@2.1.0/dist/typed.umd.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>

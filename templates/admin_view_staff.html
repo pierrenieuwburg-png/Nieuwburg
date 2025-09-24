@@ -43,6 +43,11 @@
 
 <div class="admin-section">
     <h2 style="color: #c82333;">Danger Zone</h2>
+    <form action="{{ url_for('admin_reset_staff_password', user_id=staff_member.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to reset this staff member\'s password?');" style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #eee;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <p>Generate a new temporary password for this staff member and require them to change it on their next login.</p>
+        <button type="submit" class="cta-outline">Reset Password</button>
+    </form>
     <form action="{{ url_for('admin_delete_staff', user_id=staff_member.id) }}" method="POST" onsubmit="return confirm('DANGER: You are about to permanently delete this staff member. This action cannot be undone. Are you absolutely sure?');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <p>Permanently remove this staff member and all associated data from the system.</p>

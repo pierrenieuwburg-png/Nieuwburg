@@ -915,6 +915,9 @@ footer {
 .status-pending { background-color: #ffc107; }
 .status-confirmed { background-color: #28a745; }
 .status-completed { background-color: #6c757d; }
+.status-in-progress { background-color: #ffc107; color: #333; }
+.status-cancelled { background-color: #6c757d; }
+.status-scheduled { background-color: #007bff; }
 
 /* --- Flash Messages Container --- */
 .flash-messages-container { 
@@ -1261,4 +1264,59 @@ footer {
 
 .action-dropdown.open .action-dropdown-content {
   display: block;
+}
+
+.default-avatar {
+  box-sizing: border-box; /* Ensures the border is inside the element's dimensions */
+  background-color: #e9ecef; /* A neutral background color */
+  border:10px solid #e9ecef; /* This creates the "padding" effect */
+  object-fit: cover;
+}
+
+/* --- Booking Calculator Styles --- */
+.booking-calculator-form {
+  max-height: 55vh;
+  overflow-y: auto;
+  padding-right: 15px;
+  margin: 20px 0;
+}
+.booking-category {
+  margin-bottom: 25px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 15px;
+}
+.booking-category h3 {
+  margin-top: 0;
+}
+.booking-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+.booking-item-row label {
+  font-weight: 500;
+}
+.booking-item-row .price {
+  color: #555;
+  font-size: 0.9rem;
+}
+.quantity-input {
+  width: 70px;
+  text-align: center;
+}
+.booking-summary {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 2px solid #333;
+}
+.summary-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 1.1rem;
+  padding: 8px 0;
+}
+.summary-item.total {
+  font-size: 1.4rem;
+  font-weight: bold;
 }

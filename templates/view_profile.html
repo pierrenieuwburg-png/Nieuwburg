@@ -9,9 +9,9 @@
   <div class="profile-header-info">
     {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
     {% if current_user.profile.profile_image == 'avatar_picture_profile_user_icon.png' %}
-      <img src="{{ url_for('static', filename='img/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="profile-avatar-large">
+    <img src="{{ url_for('static', filename='img/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="profile-avatar-large default-avatar">
     {% else %}
-      <img src="{{ url_for('static', filename='uploads/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="profile-avatar-large" onerror="this.onerror=null; this.src='{{ default_avatar_url }}';">
+    <img src="{{ url_for('static', filename='uploads/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="profile-avatar-large" onerror="this.onerror=null; this.src='{{ default_avatar_url }}';">
     {% endif %}
     <h1 class="section-title">{{ current_user.profile.full_name or current_user.email }}</h1>
   </div>

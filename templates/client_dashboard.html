@@ -5,16 +5,13 @@
 
 <section class="container bookings-page">
 <div class="profile-header">
-<div class="profile-header-info">
-  {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
-  {% if current_user.profile.profile_image == 'avatar_picture_profile_user_icon.png' %}
-    <img src="{{ url_for('static', filename='img/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="profile-avatar-large">
-  {% else %}
-    <img src="{{ url_for('static', filename='uploads/' + current_user.profile.profile_image) }}" alt="Profile Avatar" class="profile-avatar-large" onerror="this.onerror=null; this.src='{{ default_avatar_url }}';">
-  {% endif %}
-  <h1 class="section-title">Welcome, {{ current_user.profile.full_name or current_user.email }}!</h1>
-</div>
-<a href="{{ url_for('profile') }}" class="cta-outline">Edit Profile</a>
+    <div class="profile-header-info">
+      {# ... image and welcome message ... #}
+    </div>
+    <div class="profile-header-actions" style="display: flex; gap: 15px;">
+        <a href="{{ url_for('profile') }}" class="cta-outline">Edit Profile</a>
+        <button class="cta" id="dashboard-quote-btn">Request New Quote</button>
+    </div>
 </div>
 
 <div class="admin-section" style="margin-top: 30px;">

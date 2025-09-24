@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}Admin{% endblock %} - Nieuwburg Blitz</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -20,7 +21,10 @@
         <a href="{{ url_for('admin_staff') }}" class="admin-nav-link">Staff</a>
         <a href="{{ url_for('admin_quotes') }}" class="admin-nav-link">Quotes</a>
         <a href="{{ url_for('admin_invoices') }}" class="admin-nav-link">Invoices</a>
+        <a href="{{ url_for('admin_applications') }}" class="admin-nav-link">Blitz Applications</a>
+        <a href="{{ url_for('admin_service_categories') }}" class="admin-nav-link">Services</a>
     </nav>
+    
       <div class="admin-sidebar-footer">
         <a href="{{ url_for('profile') }}">Edit My Profile</a>
         <a href="{{ url_for('index') }}">View Public Site</a>

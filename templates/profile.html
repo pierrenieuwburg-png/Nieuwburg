@@ -14,9 +14,9 @@
         {# This part for displaying the image remains the same #}
         {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
         {% if user_profile.profile_image == 'avatar_picture_profile_user_icon.png' %}
-          <img src="{{ url_for('static', filename='img/' + user_profile.profile_image) }}" alt="Profile Preview" id="profile-preview">
+        <img src="{{ url_for('static', filename='img/' + user_profile.profile_image) }}" alt="Profile Preview" id="profile-preview" class="default-avatar">
         {% else %}
-          <img src="{{ url_for('static', filename='uploads/' + user_profile.profile_image) }}" alt="Profile Preview" id="profile-preview" onerror="this.onerror=null; this.src='{{ default_avatar_url }}';">
+        <img src="{{ url_for('static', filename='uploads/' + user_profile.profile_image) }}" alt="Profile Preview" id="profile-preview" onerror="this.onerror=null; this.src='{{ default_avatar_url }}';">
         {% endif %}
 
         <div class="profile-image-actions" style="display: flex; align-items: center; justify-content: center; margin-top: 10px;">
