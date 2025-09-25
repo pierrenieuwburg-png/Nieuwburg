@@ -10,6 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700&family=Oswald:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -109,29 +110,78 @@
   </div>
 
   <div id="booking-modal" class="modal-overlay">
-  <div class="modal-content" style="max-width: 700px;">
-    <button id="close-booking-modal-button" class="modal-close" aria-label="Close booking form">&times;</button>
-    <h2>Book a Service</h2>
-    <p>Build your custom cleaning service below. The price will update automatically.</p>
+    <div class="modal-content" style="max-width: 700px;">
+        <button id="close-booking-modal-button" class="modal-close" aria-label="Close booking form">&times;</button>
 
-    <div id="booking-calculator-content">
-      <p style="text-align: center; padding: 40px 0;">Loading services...</p>
+        <div id="booking-step-1">
+            <h2 style="text-align: center; margin-bottom: 25px;">Which service are you looking for?</h2>
+            <div id="booking-category-list">
+                <p style="text-align: center; padding: 40px 0;">Loading services...</p>
+            </div>
+        </div>
+
+        <div id="booking-step-2" class="hidden">
+            <button id="booking-back-btn" class="cta-outline" style="position: absolute; top: 25px; left: 30px; padding: 5px 10px; font-size: 0.9rem;">← Back</button>
+            <h2 id="booking-step-2-title" style="text-align: center;">Build Your Service</h2>
+
+            <div id="booking-calculator-content">
+                </div>
+
+            <div id="booking-scheduler-content" class="hidden" style="margin-top: 20px;">
+                <hr>
+                <h3 style="margin-top: 20px;">Select a Date & Time</h3>
+                <div style="display: flex; gap: 20px;">
+                    <div style="flex: 1;">
+                        <label for="booking-date">Choose a date:</label>
+                        <input type="date" id="booking-date" name="booking-date" class="form-control">
+                    </div>
+                    <div style="flex: 1;">
+                        <label for="booking-time">Available start times:</label>
+                        <select id="booking-time" name="booking-time" class="form-control" disabled>
+                            <option>Please select a date first</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div id="booking-customer-details" class="hidden" style="margin-top: 20px;">
+                <hr>
+                <h3 style="margin-top: 20px;">Your Details</h3>
+                <form id="customer-details-form">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div class="form-group">
+                            <label for="customer-name">Full Name</label>
+                            <input type="text" id="customer-name" name="customer-name" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="customer-phone">Phone Number</label>
+                            <input type="tel" id="customer-phone" name="customer-phone" class="form-control" required>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top: 15px;">
+                        <label for="customer-email">Email Address</label>
+                        <input type="email" id="customer-email" name="customer-email" class="form-control" required>
+                    </div>
+                </form>
+            </div>
+
+            <div id="booking-summary-container" class="hidden">
+                <div class="booking-summary">
+                    <div class="summary-item">
+                        <span>Estimated Time</span>
+                        <strong id="booking-time-total">0 mins</strong>
+                    </div>
+                    <div class="summary-item total">
+                        <span>Estimated Total</span>
+                        <strong id="booking-price-total">R0.00</strong>
+                    </div>
+                </div>
+                <button class="cta" id="booking-next-step-btn" style="width: 100%; margin-top: 20px;">Next: Choose Date & Time</button>
+                <button class="cta hidden" id="booking-confirm-btn" style="width: 100%; margin-top: 20px;">Confirm & Book Now</button>
+            </div>
+        </div>
     </div>
-
-    <div class="booking-summary">
-      <div class="summary-item">
-        <span>Estimated Time</span>
-        <strong id="booking-time-total">0 mins</strong>
-      </div>
-      <div class="summary-item total">
-        <span>Estimated Total</span>
-        <strong id="booking-price-total">R0.00</strong>
-      </div>
-    </div>
-
-    <button class="cta" id="booking-next-step-btn" style="width: 100%; margin-top: 20px;">Next: Choose Date & Time</button>
   </div>
-</div>
   
   <div id="delete-confirm-modal" class="modal-overlay">
     <div class="modal-content">
@@ -181,6 +231,26 @@
         <button type="submit">Submit Application</button>
       </form>
     </div>
+</div>
+<div id="booking-customer-details" class="hidden" style="margin-top: 20px;">
+  <hr>
+  <h3 style="margin-top: 20px;">Your Details</h3>
+  <form id="customer-details-form">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <div class="form-group">
+        <label for="customer-name">Full Name</label>
+        <input type="text" id="customer-name" name="customer-name" class="form-control" required>
+      </div>
+      <div class="form-group">
+        <label for="customer-phone">Phone Number</label>
+        <input type="tel" id="customer-phone" name="customer-phone" class="form-control" required>
+      </div>
+    </div>
+    <div class="form-group" style="margin-top: 15px;">
+      <label for="customer-email">Email Address</label>
+      <input type="email" id="customer-email" name="customer-email" class="form-control" required>
+    </div>
+  </form>
 </div>
 
 <script src="https://unpkg.com/typed.js@2.1.0/dist/typed.umd.js"></script>

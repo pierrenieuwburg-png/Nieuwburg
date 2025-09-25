@@ -61,8 +61,11 @@ if (bookingModal) {
         bookingModal.classList.add('visible');
         // Only initialize the calculator the very first time the modal is opened
         if (!calculatorInitialized) {
-            initBookingCalculator();
+            initBookingModal();
             calculatorInitialized = true;
+        } else {
+            // If already initialized, just reset to the first step
+            renderStep1();
         }
     };
 
@@ -626,89 +629,265 @@ async function loadPosts() {
 }
 
 // --- BOOKING CALCULATOR ---
-async function initBookingCalculator() {
-    const container = document.getElementById('booking-calculator-content');
-    if (!container) return;
+let allServicesData = []; // Store service data globally within the script's scope
+
+async function initBookingModal() {
+    const step1 = document.getElementById('booking-step-1');
+    const categoryListContainer = document.getElementById('booking-category-list');
+    if (!step1 || !categoryListContainer) return;
 
     try {
+        // Fetch service data only once
         const response = await fetch('/api/services');
-        const categories = await response.json();
-        
-        let formHtml = '<form id="booking-calculator-form" class="booking-calculator-form">';
-        formHtml += `
-            <div class="booking-category">
-                <h3>Select Frequency</h3>
-                <select id="booking-frequency" name="frequency" class="form-control">
-                    <option value="Once-Off">Once-Off</option>
-                    <option value="Weekly">Weekly</option>
-                    <option value="Bi-Weekly">Bi-Weekly</option>
-                    <option value="Monthly">Monthly</option>
-                </select>
-            </div>
-        `;
+        if (!response.ok) throw new Error('Failed to fetch services');
+        allServicesData = await response.json();
 
-        categories.forEach(cat => {
-            formHtml += `<div class="booking-category"><h3>${cat.name}</h3>`;
-            if (cat.description) formHtml += `<p style="font-size: 0.9rem; color: #666;">${cat.description}</p>`;
-
-            cat.items.forEach(item => {
-                formHtml += `<div class="booking-item-row" data-item-id="${item.id}">`;
-                
-                if (cat.calculation_method === 'quantity') {
-                    formHtml += `<label for="item-${item.id}">${item.name}</label>`;
-                    formHtml += `<input type="number" id="item-${item.id}" name="item_${item.id}" class="quantity-input" min="0" value="0" data-item-type="quantity">`;
-                } else if (cat.calculation_method === 'options') {
-                    formHtml += `<label for="item-${item.id}">${item.name}</label>`;
-                    formHtml += `<input type="checkbox" id="item-${item.id}" name="item_${item.id}" data-item-type="option">`;
-                }
-                
-                formHtml += `</div>`;
-            });
-            formHtml += `</div>`;
-        });
-
-        formHtml += '</form>';
-        container.innerHTML = formHtml;
-
-        // --- Calculation Logic ---
-        const form = document.getElementById('booking-calculator-form');
-        const priceTotalEl = document.getElementById('booking-price-total');
-        const timeTotalEl = document.getElementById('booking-time-total');
-
-        const calculateTotal = () => {
-            let totalPrice = 0;
-            let totalTime = 0;
-            const selectedFrequency = document.getElementById('booking-frequency').value;
-
-            const inputs = form.querySelectorAll('input[data-item-type]');
-            
-            inputs.forEach(input => {
-                const itemId = input.closest('.booking-item-row').dataset.itemId;
-                const category = categories.find(c => c.items.some(i => i.id == itemId));
-                const item = category.items.find(i => i.id == itemId);
-                const priceInfo = item.prices.find(p => p.frequency === selectedFrequency);
-                
-                if (priceInfo) {
-                    if (input.type === 'number' && input.value > 0) {
-                        totalPrice += input.value * priceInfo.price;
-                        totalTime += input.value * item.estimated_time_mins;
-                    } else if (input.type === 'checkbox' && input.checked) {
-                        totalPrice += priceInfo.price;
-                        totalTime += item.estimated_time_mins;
-                    }
-                }
-            });
-            
-            priceTotalEl.textContent = `R${totalPrice.toFixed(2)}`;
-            timeTotalEl.textContent = `${totalTime} mins`;
-        };
-        
-        form.addEventListener('change', calculateTotal);
-        form.addEventListener('keyup', calculateTotal);
-        calculateTotal(); // Initial calculation
+        // Render the first step (category selection)
+        renderStep1();
 
     } catch (error) {
-        container.innerHTML = '<p style="color: red; text-align: center;">Error loading services. Please try again later.</p>';
-        console.error("Booking calculator error:", error);
+        categoryListContainer.innerHTML = '<p style="color: red; text-align: center;">Error loading services. Please try again later.</p>';
+        console.error("Booking modal error:", error);
     }
+}
+
+function renderStep1() {
+    const step1 = document.getElementById('booking-step-1');
+    const step2 = document.getElementById('booking-step-2');
+    const categoryListContainer = document.getElementById('booking-category-list');
+    
+    // Reset to step 1 view
+    step1.classList.remove('hidden');
+    step2.classList.add('hidden');
+    document.getElementById('booking-calculator-content').innerHTML = '';
+    document.getElementById('booking-scheduler-content').classList.add('hidden');
+    document.getElementById('booking-customer-details').classList.add('hidden');
+    document.getElementById('booking-summary-container').classList.add('hidden');
+    document.getElementById('booking-next-step-btn').classList.remove('hidden');
+    document.getElementById('booking-confirm-btn').classList.add('hidden');
+
+
+    if (allServicesData.length === 0) {
+        categoryListContainer.innerHTML = '<p style="text-align: center;">No services are currently available. Please check back later.</p>';
+        return;
+    }
+
+    // Generate HTML for each service category
+    categoryListContainer.innerHTML = allServicesData.map(category => `
+        <div class="service-category-item" data-category-id="${category.id}">
+            <h4>${category.name}</h4>
+            <p>${category.description || ''}</p>
+        </div>
+    `).join('');
+
+    // Add click listeners to each category item
+    document.querySelectorAll('.service-category-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const categoryId = item.dataset.categoryId;
+            renderStep2(categoryId);
+        });
+    });
+}
+
+
+function renderStep2(categoryId) {
+    const step1 = document.getElementById('booking-step-1');
+    const step2 = document.getElementById('booking-step-2');
+    const titleEl = document.getElementById('booking-step-2-title');
+    const calculatorContent = document.getElementById('booking-calculator-content');
+    const backBtn = document.getElementById('booking-back-btn');
+    const summaryContainer = document.getElementById('booking-summary-container');
+
+    const category = allServicesData.find(c => c.id == categoryId);
+    if (!category) return;
+
+    // Switch views
+    step1.classList.add('hidden');
+    step2.classList.remove('hidden');
+    summaryContainer.classList.remove('hidden');
+    titleEl.textContent = `Configure: ${category.name}`;
+
+    // Build the form for the selected category's items
+    let formHtml = '<form id="booking-calculator-form" class="booking-calculator-form">';
+    formHtml += `
+        <div class="booking-category">
+            <h3>Select Frequency</h3>
+            <select id="booking-frequency" name="frequency" class="form-control">
+                <option value="Once-Off">Once-Off</option>
+                <option value="Weekly">Weekly</option>
+                <option value="Bi-Weekly">Bi-Weekly</option>
+                <option value="Monthly">Monthly</option>
+            </select>
+        </div>
+    `;
+
+    category.items.forEach(item => {
+        formHtml += `<div class="booking-item-row" data-item-id="${item.id}">`;
+        if (category.calculation_method === 'quantity') {
+            formHtml += `<label for="item-${item.id}">${item.name}</label>`;
+            formHtml += `<input type="number" id="item-${item.id}" name="item_${item.id}" class="quantity-input" min="0" value="0" data-item-type="quantity">`;
+        } else if (category.calculation_method === 'options') {
+            formHtml += `<label for="item-${item.id}">${item.name}</label>`;
+            formHtml += `<input type="checkbox" id="item-${item.id}" name="item_${item.id}" data-item-type="option">`;
+        }
+        formHtml += `</div>`;
+    });
+    formHtml += '</form>';
+    calculatorContent.innerHTML = formHtml;
+
+    // Attach calculation logic
+    attachCalculationAndSubmissionLogic(category);
+
+    // Add event listener for the back button
+    backBtn.onclick = renderStep1;
+}
+
+
+function attachCalculationAndSubmissionLogic(category) {
+    const form = document.getElementById('booking-calculator-form');
+    const priceTotalEl = document.getElementById('booking-price-total');
+    const timeTotalEl = document.getElementById('booking-time-total');
+
+    const calculateTotal = () => {
+        let totalPrice = 0;
+        let totalTime = 0;
+        const selectedFrequency = document.getElementById('booking-frequency').value;
+        const inputs = form.querySelectorAll('input[data-item-type]');
+        
+        inputs.forEach(input => {
+            const itemId = input.closest('.booking-item-row').dataset.itemId;
+            const item = category.items.find(i => i.id == itemId);
+            if (!item) return;
+
+            const priceInfo = item.prices.find(p => p.frequency === selectedFrequency);
+            if (priceInfo) {
+                if (input.type === 'number' && input.value > 0) {
+                    totalPrice += input.value * priceInfo.price;
+                    totalTime += input.value * item.estimated_time_mins;
+                } else if (input.type === 'checkbox' && input.checked) {
+                    totalPrice += priceInfo.price;
+                    totalTime += item.estimated_time_mins;
+                }
+            }
+        });
+        
+        priceTotalEl.textContent = `R${totalPrice.toFixed(2)}`;
+        timeTotalEl.textContent = `${totalTime} mins`;
+    };
+    
+    form.addEventListener('change', calculateTotal);
+    form.addEventListener('keyup', calculateTotal);
+    calculateTotal();
+
+    // --- SCHEDULER & SUBMISSION LOGIC ---
+    const nextStepBtn = document.getElementById('booking-next-step-btn');
+    const confirmBtn = document.getElementById('booking-confirm-btn');
+    const schedulerContent = document.getElementById('booking-scheduler-content');
+    const customerDetailsContent = document.getElementById('booking-customer-details');
+    const dateInput = document.getElementById('booking-date');
+    const timeSelect = document.getElementById('booking-time');
+
+    dateInput.min = new Date().toISOString().split("T")[0];
+
+    // Use .onclick to ensure we're not adding duplicate listeners
+    nextStepBtn.onclick = () => {
+        schedulerContent.classList.remove('hidden');
+        customerDetailsContent.classList.remove('hidden');
+        nextStepBtn.classList.add('hidden');
+        confirmBtn.classList.remove('hidden');
+    };
+
+    dateInput.onchange = async () => {
+        const selectedDate = dateInput.value;
+        if (!selectedDate) return;
+        timeSelect.disabled = true;
+        timeSelect.innerHTML = '<option>Loading available times...</option>';
+        try {
+            const response = await fetch(`/api/availability/${selectedDate}`);
+            const availableSlots = await response.json();
+            if (availableSlots.length > 0) {
+                timeSelect.innerHTML = '<option value="">-- Select a time --</option>';
+                availableSlots.forEach(slot => {
+                    const option = document.createElement('option');
+                    option.value = slot;
+                    option.textContent = slot;
+                    timeSelect.appendChild(option);
+                });
+                timeSelect.disabled = false;
+            } else {
+                timeSelect.innerHTML = '<option>No available slots for this day</option>';
+            }
+        } catch (error) {
+            console.error("Error fetching availability:", error);
+            timeSelect.innerHTML = '<option>Error loading times</option>';
+        }
+    };
+
+    confirmBtn.onclick = async () => {
+        const selectedFrequency = document.getElementById('booking-frequency').value;
+        const selectedDate = dateInput.value;
+        const selectedTime = timeSelect.value;
+        const customerName = document.getElementById('customer-name').value;
+        const customerEmail = document.getElementById('customer-email').value;
+        const customerPhone = document.getElementById('customer-phone').value;
+
+        if (!selectedDate || !selectedTime || !customerName || !customerEmail) {
+            alert('Please fill in all required fields: date, time, name, and email.');
+            return;
+        }
+
+        let services = [];
+        const inputs = form.querySelectorAll('input[data-item-type]');
+        inputs.forEach(input => {
+            if ((input.type === 'number' && input.value > 0) || (input.type === 'checkbox' && input.checked)) {
+                const row = input.closest('.booking-item-row');
+                services.push({
+                    id: row.dataset.itemId,
+                    name: row.querySelector('label').textContent,
+                    quantity: input.type === 'number' ? input.value : 1
+                });
+            }
+        });
+
+        const bookingData = {
+            name: customerName, email: customerEmail, phone: customerPhone,
+            date: selectedDate, time: selectedTime, frequency: selectedFrequency,
+            totalPrice: parseFloat(priceTotalEl.textContent.replace('R', '')),
+            totalTime: parseInt(timeTotalEl.textContent),
+            services: services
+        };
+
+        try {
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Submitting...';
+            
+            const response = await fetch('/api/create_booking', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bookingData)
+            });
+            const result = await response.json();
+
+            if (result.status === 'ok') {
+                const modalContent = document.querySelector('#booking-modal .modal-content');
+                modalContent.innerHTML = `
+                    <button id="close-booking-modal-button" class="modal-close" aria-label="Close form">&times;</button>
+                    <p style="text-align: center; font-size: 1.1rem; color: var(--accent); padding: 40px 0;">${result.message}</p>
+                `;
+                const newCloseButton = modalContent.querySelector('#close-booking-modal-button');
+                newCloseButton.addEventListener('click', () => {
+                    document.getElementById('booking-modal').classList.remove('visible');
+                    // We might need to reload the page or re-initialize the modal for the next booking
+                });
+            } else {
+                alert('Booking failed: ' + (result.message || 'Unknown error.'));
+            }
+        } catch (error) {
+            console.error('Booking submission error:', error);
+            alert('An unexpected network error occurred.');
+        } finally {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Confirm & Book Now';
+        }
+    };
 }

@@ -7,7 +7,6 @@ from wtforms import StringField, PasswordField, BooleanField, SubmitField
 from wtforms.validators import DataRequired, Email
 from flask_wtf.csrf import CSRFProtect
 from flask import Flask, render_template, jsonify, request, redirect, url_for, flash
-from datetime import datetime
 import json
 import os
 import re
@@ -19,10 +18,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
 from flask_mail import Mail, Message
-from datetime import datetime
-from datetime import date
-from datetime import timedelta
-from datetime import datetime, date, timedelta, timezone # Add timezone here
+from datetime import datetime, date, timedelta, timezone, time # Add timezone here
 from wtforms import SelectField, DateField, FieldList, FormField, FloatField
 from wtforms.validators import Optional
 from flask import Response
@@ -33,7 +29,6 @@ from werkzeug.datastructures import FileStorage
 from dotenv import load_dotenv
 load_dotenv()
 from wtforms import StringField, PasswordField, BooleanField, SubmitField, IntegerField
-
 from flask_wtf.file import FileField, FileAllowed
 
 app = Flask(__name__)
@@ -221,6 +216,20 @@ class ServicePrice(db.Model):
 
     def __repr__(self):
         return f'<ServicePrice {self.frequency} - R{self.price}>'
+    
+class Booking(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    customer_name = db.Column(db.String(100), nullable=False)
+    customer_email = db.Column(db.String(100), nullable=False)
+    customer_phone = db.Column(db.String(20))
+    booking_date = db.Column(db.Date, nullable=False)
+    booking_time = db.Column(db.Time, nullable=False)
+    total_price = db.Column(db.Float, nullable=False)
+    estimated_time_mins = db.Column(db.Integer)
+    status = db.Column(db.String(50), default='Pending Payment')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # This will store the selected services as a JSON string
+    service_details = db.Column(db.Text)
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -1659,6 +1668,76 @@ def api_services():
         output.append(cat_data)
         
     return jsonify(output)
+
+@app.route('/api/availability/<string:date_str>')
+def api_availability(date_str):
+    try:
+        booking_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({'error': 'Invalid date format'}), 400
+
+    # --- Define Your Business Hours ---
+    opening_time = time(8, 0)  # 8:00 AM
+    closing_time = time(17, 0) # 5:00 PM
+    slot_interval_mins = 30    # Check for a new slot every 30 minutes
+    # --------------------------------
+
+    existing_jobs_on_day = Job.query.filter(Job.scheduled_date == booking_date).all()
+    
+    available_slots = []
+    current_time = datetime.combine(booking_date, opening_time)
+    end_of_day = datetime.combine(booking_date, closing_time)
+
+    while current_time < end_of_day:
+        slot_is_available = True
+        # Check if this slot conflicts with any existing jobs
+        for job in existing_jobs_on_day:
+            if job.start_time:
+                job_start = datetime.combine(booking_date, job.start_time)
+                # Simple check: if a job starts at this time, the slot is taken.
+                # A more advanced check would consider the job's duration.
+                if current_time.time() == job.start_time:
+                    slot_is_available = False
+                    break
+        
+        if slot_is_available:
+            available_slots.append(current_time.strftime('%H:%M'))
+
+        current_time += timedelta(minutes=slot_interval_mins)
+
+    return jsonify(available_slots)
+
+@app.route('/api/create_booking', methods=['POST'])
+@csrf.exempt # Exempt this public-facing API from CSRF
+def create_booking():
+    data = request.json
+    try:
+        # Extract all the data from the incoming request
+        service_details_json = json.dumps(data.get('services'))
+        booking_time_dt = datetime.strptime(data.get('time'), '%H:%M').time()
+
+        new_booking = Booking(
+            customer_name=data.get('name'),
+            customer_email=data.get('email'),
+            customer_phone=data.get('phone'),
+            booking_date=datetime.strptime(data.get('date'), '%Y-%m-%d').date(),
+            booking_time=booking_time_dt,
+            total_price=float(data.get('totalPrice')),
+            estimated_time_mins=int(data.get('totalTime')),
+            service_details=service_details_json
+        )
+        db.session.add(new_booking)
+        db.session.commit()
+
+        # In the future, this is where we would generate and return a payment link.
+        return jsonify({
+            'status': 'ok',
+            'message': 'Thank you! Your booking is pending confirmation. We will be in contact shortly to arrange payment.',
+            'booking_id': new_booking.id
+        })
+    except Exception as e:
+        print(f"Error creating booking: {e}")
+        return jsonify({'status': 'error', 'message': 'Could not create booking.'}), 500
 
 # --- CONTEXT PROCESSOR & MAIN EXECUTION ---
 @app.context_processor
