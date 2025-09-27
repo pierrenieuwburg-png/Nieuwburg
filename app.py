@@ -28,6 +28,7 @@ from flask_session import Session
 from werkzeug.datastructures import FileStorage
 from dotenv import load_dotenv
 load_dotenv()
+print("--- Loaded Google Maps API Key:", os.environ.get('GOOGLE_MAPS_API_KEY'), "---")
 from wtforms import StringField, PasswordField, BooleanField, SubmitField, IntegerField
 from flask_wtf.file import FileField, FileAllowed
 
@@ -222,6 +223,7 @@ class Booking(db.Model):
     customer_name = db.Column(db.String(100), nullable=False)
     customer_email = db.Column(db.String(100), nullable=False)
     customer_phone = db.Column(db.String(20))
+    address = db.Column(db.Text, nullable=True)
     booking_date = db.Column(db.Date, nullable=False)
     booking_time = db.Column(db.Time, nullable=False)
     total_price = db.Column(db.Float, nullable=False)
@@ -1720,6 +1722,7 @@ def create_booking():
             customer_name=data.get('name'),
             customer_email=data.get('email'),
             customer_phone=data.get('phone'),
+            address=data.get('address'),
             booking_date=datetime.strptime(data.get('date'), '%Y-%m-%d').date(),
             booking_time=booking_time_dt,
             total_price=float(data.get('totalPrice')),
@@ -1743,6 +1746,11 @@ def create_booking():
 @app.context_processor
 def inject_now():
     return {'now': datetime.now(timezone.utc)}
+
+# --- CONTEXT PROCESSOR FOR GOOGLE MAPS ---
+@app.context_processor
+def inject_google_maps_api_key():
+    return dict(google_maps_api_key=os.environ.get('GOOGLE_MAPS_API_KEY'))
 
 if __name__ == '__main__':
     with app.app_context():

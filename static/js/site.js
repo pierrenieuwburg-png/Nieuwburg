@@ -49,26 +49,24 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  // --- NEW: Booking Modal Logic ---
+  // --- NEW: Booking Modal Logic (CORRECTED) ---
 const bookingModal = document.getElementById('booking-modal');
 if (bookingModal) {
     const openButtons = ['book-service-btn', 'process-quote-button', 'dashboard-quote-btn', 'quote-button'];
     const closeButton = document.getElementById('close-booking-modal-button');
-    let calculatorInitialized = false; // Prevents re-loading data
+    let dataLoaded = false;
 
+    // This function now just opens the modal and calls renderStep1
     const openBookingModal = (e) => {
         e.preventDefault();
         bookingModal.classList.add('visible');
-        // Only initialize the calculator the very first time the modal is opened
-        if (!calculatorInitialized) {
-            initBookingModal();
-            calculatorInitialized = true;
+        if (!dataLoaded) {
+            initBookingModal(); // Fetches data and sets up listeners ONCE
+            dataLoaded = true;
         } else {
-            // If already initialized, just reset to the first step
-            renderStep1();
+            renderStep1(); // Just show step 1 if data is already loaded
         }
     };
-
     
     const closeBookingModal = () => {
         bookingModal.classList.remove('visible');
@@ -464,7 +462,6 @@ confirmDeleteBtn.addEventListener('click', async () => {
       if (e.target === deleteModal) closeDeleteModal();
     });
   }
-  initBookingCalculator();
 });
 
 // --- FORM HANDLERS ---
@@ -629,129 +626,165 @@ async function loadPosts() {
 }
 
 // --- BOOKING CALCULATOR ---
-let allServicesData = []; // Store service data globally within the script's scope
+let allServicesData = [];
+let selectedCategoryId = null;
+let mapInitialized = false;
+let selectedAddress = "";
 
 async function initBookingModal() {
-    const step1 = document.getElementById('booking-step-1');
-    const categoryListContainer = document.getElementById('booking-category-list');
-    if (!step1 || !categoryListContainer) return;
+    // This listener is now set up ONCE when the modal initializes
+    document.querySelectorAll('.booking-back-btn').forEach(btn => {
+        btn.onclick = (e) => {
+            const targetStep = parseInt(e.target.dataset.targetStep);
+            if (targetStep === 1) renderStep1();
+            if (targetStep === 2) renderStep2_Address();
+        };
+    });
 
     try {
-        // Fetch service data only once
         const response = await fetch('/api/services');
         if (!response.ok) throw new Error('Failed to fetch services');
         allServicesData = await response.json();
-
-        // Render the first step (category selection)
         renderStep1();
-
     } catch (error) {
-        categoryListContainer.innerHTML = '<p style="color: red; text-align: center;">Error loading services. Please try again later.</p>';
-        console.error("Booking modal error:", error);
+        // ... error handling
     }
 }
 
+// Function to switch between modal steps
+function showBookingStep(stepNumber) {
+    document.getElementById('booking-step-1').classList.add('hidden');
+    document.getElementById('booking-step-2-address').classList.add('hidden');
+    document.getElementById('booking-step-3-details').classList.add('hidden');
+
+    if (stepNumber === 1) {
+        document.getElementById('booking-step-1').classList.remove('hidden');
+    } else if (stepNumber === 2) {
+        document.getElementById('booking-step-2-address').classList.remove('hidden');
+    } else if (stepNumber === 3) {
+        document.getElementById('booking-step-3-details').classList.remove('hidden');
+    }
+}
+
+// --- STEP 1: RENDER CATEGORY SELECTION ---
 function renderStep1() {
-    const step1 = document.getElementById('booking-step-1');
-    const step2 = document.getElementById('booking-step-2');
+    showBookingStep(1);
     const categoryListContainer = document.getElementById('booking-category-list');
     
-    // Reset to step 1 view
-    step1.classList.remove('hidden');
-    step2.classList.add('hidden');
-    document.getElementById('booking-calculator-content').innerHTML = '';
-    document.getElementById('booking-scheduler-content').classList.add('hidden');
-    document.getElementById('booking-customer-details').classList.add('hidden');
-    document.getElementById('booking-summary-container').classList.add('hidden');
-    document.getElementById('booking-next-step-btn').classList.remove('hidden');
-    document.getElementById('booking-confirm-btn').classList.add('hidden');
-
-
     if (allServicesData.length === 0) {
-        categoryListContainer.innerHTML = '<p style="text-align: center;">No services are currently available. Please check back later.</p>';
+        categoryListContainer.innerHTML = '<p style="text-align: center;">No services are currently available.</p>';
         return;
     }
 
-    // Generate HTML for each service category
-    categoryListContainer.innerHTML = allServicesData.map(category => `
-        <div class="service-category-item" data-category-id="${category.id}">
-            <h4>${category.name}</h4>
-            <p>${category.description || ''}</p>
-        </div>
-    `).join('');
+    const categoryIcons = {
+        'General Cleaning': 'fa-solid fa-house',
+        'Exterior Cleaning': 'fa-solid fa-house-chimney-window',
+        'End of Tenancy/Pre tenancy': 'fa-solid fa-key',
+        'Windows Interior/exterior': 'fa-solid fa-swatchbook',
+        'default': 'fa-solid fa-star'
+    };
 
-    // Add click listeners to each category item
+    categoryListContainer.innerHTML = allServicesData.map(category => {
+        const iconClass = categoryIcons[category.name] || categoryIcons['default'];
+        return `
+            <div class="service-category-item" data-category-id="${category.id}">
+                <div class="service-category-icon-wrapper"><i class="${iconClass}"></i></div>
+                <div class="service-category-text">
+                    <h4>${category.name}</h4>
+                    <p>${category.description || ''}</p>
+                </div>
+            </div>
+        `;
+    }).join('');
+
     document.querySelectorAll('.service-category-item').forEach(item => {
         item.addEventListener('click', () => {
-            const categoryId = item.dataset.categoryId;
-            renderStep2(categoryId);
+            selectedCategoryId = item.dataset.categoryId;
+            renderStep2_Address();
         });
     });
 }
 
-
-function renderStep2(categoryId) {
-    const step1 = document.getElementById('booking-step-1');
-    const step2 = document.getElementById('booking-step-2');
-    const titleEl = document.getElementById('booking-step-2-title');
+// --- STEP 2: RENDER ADDRESS & MAP ---
+function renderStep2_Address() {
+    showBookingStep(2);
+    // The manual initMap() call has been removed.
+    document.getElementById('booking-address-next-btn').onclick = () => {
+        const streetAddressInput = document.getElementById('street-address');
+        if (!streetAddressInput.value) {
+            alert('Please enter a service address to continue.');
+            return;
+        }
+        selectedAddress = streetAddressInput.value; // Save the address
+        renderStep3_Details();
+    };
+}
+// --- STEP 3: RENDER SERVICE DETAILS & SCHEDULER ---
+function renderStep3_Details() {
+    showBookingStep(3);
+    const titleEl = document.getElementById('booking-step-3-title');
     const calculatorContent = document.getElementById('booking-calculator-content');
-    const backBtn = document.getElementById('booking-back-btn');
     const summaryContainer = document.getElementById('booking-summary-container');
 
-    const category = allServicesData.find(c => c.id == categoryId);
+    const addressDisplayText = document.getElementById('address-display-text');
+    if (addressDisplayText) addressDisplayText.textContent = selectedAddress;
+
+    const category = allServicesData.find(c => c.id == selectedCategoryId);
     if (!category) return;
 
-    // Switch views
-    step1.classList.add('hidden');
-    step2.classList.remove('hidden');
     summaryContainer.classList.remove('hidden');
     titleEl.textContent = `Configure: ${category.name}`;
 
-    // Build the form for the selected category's items
     let formHtml = '<form id="booking-calculator-form" class="booking-calculator-form">';
     formHtml += `
         <div class="booking-category">
             <h3>Select Frequency</h3>
-            <select id="booking-frequency" name="frequency" class="form-control">
-                <option value="Once-Off">Once-Off</option>
-                <option value="Weekly">Weekly</option>
-                <option value="Bi-Weekly">Bi-Weekly</option>
-                <option value="Monthly">Monthly</option>
-            </select>
+            <div id="booking-frequency-selector" class="frequency-selector">
+                <button type="button" class="freq-btn active" data-value="Once-Off">Once-Off</button>
+                <button type="button" class="freq-btn" data-value="Weekly">Weekly</button>
+                <button type="button" class="freq-btn" data-value="Bi-Weekly">Bi-Weekly</button>
+                <button type="button" class="freq-btn" data-value="Monthly">Monthly</button>
+            </div>
+            <input type="hidden" id="booking-frequency" name="frequency" value="Once-Off">
         </div>
     `;
 
     category.items.forEach(item => {
         formHtml += `<div class="booking-item-row" data-item-id="${item.id}">`;
+        formHtml += `<label for="item-${item.id}" class="booking-item-label">${item.name}</label>`;
         if (category.calculation_method === 'quantity') {
-            formHtml += `<label for="item-${item.id}">${item.name}</label>`;
-            formHtml += `<input type="number" id="item-${item.id}" name="item_${item.id}" class="quantity-input" min="0" value="0" data-item-type="quantity">`;
+            formHtml += `
+                <div class="quantity-selector">
+                    <button type="button" class="quantity-btn minus" aria-label="Decrease quantity">-</button>
+                    <input type="number" id="item-${item.id}" name="item_${item.id}" class="quantity-input" min="0" value="0" data-item-type="quantity" readonly>
+                    <button type="button" class="quantity-btn plus" aria-label="Increase quantity">+</button>
+                </div>
+            `;
         } else if (category.calculation_method === 'options') {
-            formHtml += `<label for="item-${item.id}">${item.name}</label>`;
-            formHtml += `<input type="checkbox" id="item-${item.id}" name="item_${item.id}" data-item-type="option">`;
+            formHtml += `<label class="option-selector-label"><input type="checkbox" id="item-${item.id}" name="item_${item.id}" data-item-type="option"><span class="custom-checkbox"></span></label>`;
         }
         formHtml += `</div>`;
     });
     formHtml += '</form>';
     calculatorContent.innerHTML = formHtml;
 
-    // Attach calculation logic
     attachCalculationAndSubmissionLogic(category);
-
-    // Add event listener for the back button
-    backBtn.onclick = renderStep1;
 }
 
-
+// --- ATTACH EVENT LISTENERS FOR STEP 3 & FINAL SUBMISSION ---
 function attachCalculationAndSubmissionLogic(category) {
     const form = document.getElementById('booking-calculator-form');
     const priceTotalEl = document.getElementById('booking-price-total');
     const timeTotalEl = document.getElementById('booking-time-total');
+    const hiddenFrequencyInput = document.getElementById('booking-frequency');
+
+    let totalPrice = 0;
+    let totalTime = 0;
 
     const calculateTotal = () => {
-        let totalPrice = 0;
-        let totalTime = 0;
-        const selectedFrequency = document.getElementById('booking-frequency').value;
+        totalPrice = 0;
+        totalTime = 0;
+        const selectedFrequency = hiddenFrequencyInput.value;
         const inputs = form.querySelectorAll('input[data-item-type]');
         
         inputs.forEach(input => {
@@ -770,14 +803,43 @@ function attachCalculationAndSubmissionLogic(category) {
                 }
             }
         });
-        
         priceTotalEl.textContent = `R${totalPrice.toFixed(2)}`;
         timeTotalEl.textContent = `${totalTime} mins`;
     };
     
     form.addEventListener('change', calculateTotal);
-    form.addEventListener('keyup', calculateTotal);
     calculateTotal();
+
+    form.querySelectorAll('.quantity-selector').forEach(selector => {
+        const minusBtn = selector.querySelector('.minus');
+        const plusBtn = selector.querySelector('.plus');
+        const input = selector.querySelector('.quantity-input');
+        minusBtn.addEventListener('click', () => {
+            let val = parseInt(input.value);
+            if (val > 0) {
+                input.value = val - 1;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
+        plusBtn.addEventListener('click', () => {
+            let val = parseInt(input.value);
+            input.value = val + 1;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    });
+
+    const frequencySelector = form.querySelector('#booking-frequency-selector');
+    if (frequencySelector) {
+        frequencySelector.addEventListener('click', (e) => {
+            if (e.target.matches('.freq-btn')) {
+                frequencySelector.querySelectorAll('.freq-btn').forEach(btn => btn.classList.remove('active'));
+                e.target.classList.add('active');
+                hiddenFrequencyInput.value = e.target.dataset.value;
+                hiddenFrequencyInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
+    }
+    hiddenFrequencyInput.addEventListener('change', calculateTotal);
 
     // --- SCHEDULER & SUBMISSION LOGIC ---
     const nextStepBtn = document.getElementById('booking-next-step-btn');
@@ -786,10 +848,8 @@ function attachCalculationAndSubmissionLogic(category) {
     const customerDetailsContent = document.getElementById('booking-customer-details');
     const dateInput = document.getElementById('booking-date');
     const timeSelect = document.getElementById('booking-time');
-
     dateInput.min = new Date().toISOString().split("T")[0];
 
-    // Use .onclick to ensure we're not adding duplicate listeners
     nextStepBtn.onclick = () => {
         schedulerContent.classList.remove('hidden');
         customerDetailsContent.classList.remove('hidden');
@@ -800,67 +860,66 @@ function attachCalculationAndSubmissionLogic(category) {
     dateInput.onchange = async () => {
         const selectedDate = dateInput.value;
         if (!selectedDate) return;
+        
         timeSelect.disabled = true;
-        timeSelect.innerHTML = '<option>Loading available times...</option>';
+        timeSelect.innerHTML = '<option>Loading times...</option>';
+
         try {
             const response = await fetch(`/api/availability/${selectedDate}`);
+            if (!response.ok) throw new Error('Failed to fetch times');
+            
             const availableSlots = await response.json();
+            
             if (availableSlots.length > 0) {
-                timeSelect.innerHTML = '<option value="">-- Select a time --</option>';
-                availableSlots.forEach(slot => {
-                    const option = document.createElement('option');
-                    option.value = slot;
-                    option.textContent = slot;
-                    timeSelect.appendChild(option);
-                });
+                timeSelect.innerHTML = availableSlots.map(slot => `<option value="${slot}">${slot}</option>`).join('');
                 timeSelect.disabled = false;
             } else {
-                timeSelect.innerHTML = '<option>No available slots for this day</option>';
+                timeSelect.innerHTML = '<option>No available times on this date</option>';
             }
         } catch (error) {
             console.error("Error fetching availability:", error);
-            timeSelect.innerHTML = '<option>Error loading times</option>';
+            timeSelect.innerHTML = '<option>Could not load times</option>';
         }
     };
-
+    
     confirmBtn.onclick = async () => {
-        const selectedFrequency = document.getElementById('booking-frequency').value;
-        const selectedDate = dateInput.value;
-        const selectedTime = timeSelect.value;
+        // --- Gather all data ---
         const customerName = document.getElementById('customer-name').value;
         const customerEmail = document.getElementById('customer-email').value;
         const customerPhone = document.getElementById('customer-phone').value;
-
-        if (!selectedDate || !selectedTime || !customerName || !customerEmail) {
-            alert('Please fill in all required fields: date, time, name, and email.');
+        const bookingDate = dateInput.value;
+        const bookingTime = timeSelect.value;
+        
+        // --- Validation ---
+        if (!customerName || !customerEmail || !customerPhone || !bookingDate || !bookingTime || bookingTime.includes('Please')) {
+            alert('Please fill in all your details and select a valid date and time.');
             return;
         }
 
-        let services = [];
-        const inputs = form.querySelectorAll('input[data-item-type]');
-        inputs.forEach(input => {
-            if ((input.type === 'number' && input.value > 0) || (input.type === 'checkbox' && input.checked)) {
-                const row = input.closest('.booking-item-row');
-                services.push({
-                    id: row.dataset.itemId,
-                    name: row.querySelector('label').textContent,
-                    quantity: input.type === 'number' ? input.value : 1
-                });
+        const formData = new FormData(form);
+        const services = [];
+        for (let [key, value] of formData.entries()) {
+            if (key.startsWith('item_') && value > 0) {
+                const itemId = key.split('_')[1];
+                const item = category.items.find(i => i.id == itemId);
+                services.push({ name: item.name, quantity: value });
             }
-        });
+        }
 
         const bookingData = {
-            name: customerName, email: customerEmail, phone: customerPhone,
-            date: selectedDate, time: selectedTime, frequency: selectedFrequency,
-            totalPrice: parseFloat(priceTotalEl.textContent.replace('R', '')),
-            totalTime: parseInt(timeTotalEl.textContent),
+            name: customerName,
+            email: customerEmail,
+            phone: customerPhone,
+            address: selectedAddress, // The address we saved earlier
+            date: bookingDate,
+            time: bookingTime,
+            totalPrice: totalPrice,
+            totalTime: totalTime,
             services: services
         };
 
+        // --- Send to API ---
         try {
-            confirmBtn.disabled = true;
-            confirmBtn.textContent = 'Submitting...';
-            
             const response = await fetch('/api/create_booking', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -868,26 +927,76 @@ function attachCalculationAndSubmissionLogic(category) {
             });
             const result = await response.json();
 
-            if (result.status === 'ok') {
-                const modalContent = document.querySelector('#booking-modal .modal-content');
-                modalContent.innerHTML = `
-                    <button id="close-booking-modal-button" class="modal-close" aria-label="Close form">&times;</button>
-                    <p style="text-align: center; font-size: 1.1rem; color: var(--accent); padding: 40px 0;">${result.message}</p>
-                `;
-                const newCloseButton = modalContent.querySelector('#close-booking-modal-button');
-                newCloseButton.addEventListener('click', () => {
-                    document.getElementById('booking-modal').classList.remove('visible');
-                    // We might need to reload the page or re-initialize the modal for the next booking
-                });
+            if (response.ok) {
+                alert(result.message);
+                document.getElementById('close-booking-modal-button').click(); // Close the modal
             } else {
-                alert('Booking failed: ' + (result.message || 'Unknown error.'));
+                alert('Error: ' + result.message);
             }
         } catch (error) {
             console.error('Booking submission error:', error);
-            alert('An unexpected network error occurred.');
-        } finally {
-            confirmBtn.disabled = false;
-            confirmBtn.textContent = 'Confirm & Book Now';
+            alert('A network error occurred. Please try again.');
         }
     };
+}
+
+
+// --- GOOGLE MAPS FUNCTIONALITY ---
+let map;
+let marker;
+let autocomplete;
+
+// The initMap function is now called by the Google Maps API script's callback
+function initMap() {
+    // Ensure this runs only once
+    if (mapInitialized) {
+        return;
+    }
+    mapInitialized = true;
+    // Only proceed if the map element is on the page
+    if (!document.getElementById("map")) return;
+
+    const capeTown = { lat: -33.9249, lng: 18.4241 };
+    map = new google.maps.Map(document.getElementById("map"), {
+        zoom: 12,
+        center: capeTown,
+        mapTypeControl: false,
+        streetViewControl: false,
+    });
+    marker = new google.maps.Marker({ map, position: capeTown, draggable: true });
+    const streetAddressInput = document.getElementById("street-address");
+    autocomplete = new google.maps.places.Autocomplete(streetAddressInput, {
+        componentRestrictions: { country: "za" },
+        fields: ["address_components", "geometry", "name"],
+        types: ["address"],
+    });
+
+    autocomplete.addListener("place_changed", () => {
+        const place = autocomplete.getPlace();
+        if (!place.geometry || !place.geometry.location) return;
+        map.setCenter(place.geometry.location);
+        map.setZoom(17);
+        marker.setPosition(place.geometry.location);
+        streetAddressInput.value = getFormattedAddress(place);
+    });
+
+    marker.addListener('dragend', () => {
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode({ 'location': marker.getPosition() }, (results, status) => {
+            if (status === 'OK' && results[0]) {
+                streetAddressInput.value = results[0].formatted_address;
+            } else { console.error('Geocoder failed due to: ' + status); }
+        });
+    });
+}
+
+// This is the helper function that was previously missing
+function getFormattedAddress(place) {
+    let streetNumber = "", route = "";
+    for (const component of place.address_components) {
+        const componentType = component.types[0];
+        if (componentType === "street_number") streetNumber = component.long_name;
+        if (componentType === "route") route = component.long_name;
+    }
+    return `${streetNumber} ${route}`.trim();
 }
