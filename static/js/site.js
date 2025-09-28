@@ -212,9 +212,9 @@ setupModal('join-team-modal', ['join-team-btn'], 'close-join-team-modal-button',
   });
 
   // --- Blog Logic ---
-  if (document.querySelector('.page-blog')) {
-    loadPosts();
-  }
+  // if (document.querySelector('.page-blog')) {
+  //  loadPosts();
+  // }
   
   // --- FAQ Accordion Logic ---
   const faqQuestions = document.querySelectorAll('.faq-question');
@@ -771,7 +771,6 @@ function renderStep3_Details() {
     attachCalculationAndSubmissionLogic(category);
 }
 
-// --- ATTACH EVENT LISTENERS FOR STEP 3 & FINAL SUBMISSION ---
 function attachCalculationAndSubmissionLogic(category) {
     const form = document.getElementById('booking-calculator-form');
     const priceTotalEl = document.getElementById('booking-price-total');
@@ -891,7 +890,7 @@ function attachCalculationAndSubmissionLogic(category) {
         const bookingTime = timeSelect.value;
         
         // --- Validation ---
-        if (!customerName || !customerEmail || !customerPhone || !bookingDate || !bookingTime || bookingTime.includes('Please')) {
+        if (!customerName || !customerEmail || !customerPhone || !bookingDate || !bookingTime || bookingTime.includes('date first')) {
             alert('Please fill in all your details and select a valid date and time.');
             return;
         }
@@ -899,7 +898,7 @@ function attachCalculationAndSubmissionLogic(category) {
         const formData = new FormData(form);
         const services = [];
         for (let [key, value] of formData.entries()) {
-            if (key.startsWith('item_') && value > 0) {
+            if (key.startsWith('item_') && (value > 0 || (form.querySelector(`#${key}`).type === 'checkbox' && form.querySelector(`#${key}`).checked))) {
                 const itemId = key.split('_')[1];
                 const item = category.items.find(i => i.id == itemId);
                 services.push({ name: item.name, quantity: value });
@@ -910,32 +909,51 @@ function attachCalculationAndSubmissionLogic(category) {
             name: customerName,
             email: customerEmail,
             phone: customerPhone,
-            address: selectedAddress, // The address we saved earlier
+            address: selectedAddress,
             date: bookingDate,
             time: bookingTime,
             totalPrice: totalPrice,
             totalTime: totalTime,
-            services: services
+            services: services,
+            categoryName: category.name,
+            frequency: hiddenFrequencyInput.value
         };
 
-        // --- Send to API ---
+        // --- Initialize Paystack Payment ---
         try {
-            const response = await fetch('/api/create_booking', {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            const response = await fetch('/initialize-payment', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
                 body: JSON.stringify(bookingData)
             });
-            const result = await response.json();
-
-            if (response.ok) {
-                alert(result.message);
-                document.getElementById('close-booking-modal-button').click(); // Close the modal
+            const paymentData = await response.json();
+    
+            if (paymentData.authorization_url) {
+                const handler = PaystackPop.setup({
+                    key: 'pk_test_8aeed7ae6e10339f657b2f986288333b5db779a3', // Your public key
+                    email: bookingData.email,
+                    amount: bookingData.totalPrice * 100, // Amount in kobo
+                    currency: 'ZAR',
+                    ref: paymentData.reference,
+                    callback: function(response) {
+                        window.location.href = '/payment-callback?reference=' + response.reference;
+                    },
+                    onClose: function() {
+                        alert('Payment window closed.');
+                    }
+                });
+                handler.openIframe();
             } else {
-                alert('Error: ' + result.message);
+                alert('Could not initialize payment. Please try again.');
             }
+    
         } catch (error) {
             console.error('Booking submission error:', error);
-            alert('A network error occurred. Please try again.');
+            alert('An error occurred. Please try again.');
         }
     };
 }
@@ -948,12 +966,12 @@ let autocomplete;
 
 // The initMap function is now called by the Google Maps API script's callback
 function initMap() {
-    // Ensure this runs only once
     if (mapInitialized) {
         return;
     }
     mapInitialized = true;
-    // Only proceed if the map element is on the page
+    initBookingModal(); // Initialize the booking system ONLY AFTER the map is ready.
+
     if (!document.getElementById("map")) return;
 
     const capeTown = { lat: -33.9249, lng: 18.4241 };
@@ -967,36 +985,29 @@ function initMap() {
     const streetAddressInput = document.getElementById("street-address");
     autocomplete = new google.maps.places.Autocomplete(streetAddressInput, {
         componentRestrictions: { country: "za" },
-        fields: ["address_components", "geometry", "name"],
+        fields: ["address_components", "geometry", "name", "formatted_address"], // Add formatted_address
         types: ["address"],
     });
 
     autocomplete.addListener("place_changed", () => {
         const place = autocomplete.getPlace();
         if (!place.geometry || !place.geometry.location) return;
+
+        // ** THIS IS THE CHANGE **
+        streetAddressInput.value = place.formatted_address; // Use the full formatted address
+        
         map.setCenter(place.geometry.location);
         map.setZoom(17);
         marker.setPosition(place.geometry.location);
-        streetAddressInput.value = getFormattedAddress(place);
     });
 
     marker.addListener('dragend', () => {
         const geocoder = new google.maps.Geocoder();
         geocoder.geocode({ 'location': marker.getPosition() }, (results, status) => {
             if (status === 'OK' && results[0]) {
-                streetAddressInput.value = results[0].formatted_address;
+                // ** THIS IS THE CHANGE **
+                streetAddressInput.value = results[0].formatted_address; // Use the full formatted address
             } else { console.error('Geocoder failed due to: ' + status); }
         });
     });
-}
-
-// This is the helper function that was previously missing
-function getFormattedAddress(place) {
-    let streetNumber = "", route = "";
-    for (const component of place.address_components) {
-        const componentType = component.types[0];
-        if (componentType === "street_number") streetNumber = component.long_name;
-        if (componentType === "route") route = component.long_name;
-    }
-    return `${streetNumber} ${route}`.trim();
 }

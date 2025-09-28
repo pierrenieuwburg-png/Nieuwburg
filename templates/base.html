@@ -7,6 +7,7 @@
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}Nieuwburg Blitz Cleaning Services{% endblock %}</title>
 
+  <script src="https://js.paystack.co/v1/inline.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700&family=Oswald:wght@700&display=swap" rel="stylesheet">
@@ -148,10 +149,6 @@
 
         <div id="booking-step-3-details" class="hidden">
             <button class="booking-back-btn cta-outline" data-target-step="2">← Back</button>
-
-            <div id="booking-selected-address" style="text-align: center; margin: 10px 0; padding: 8px; background-color: #f0f5fa; border-radius: 4px; font-size: 0.9rem;">
-              <strong style="color: #555;">Service Address:</strong> <span id="address-display-text"></span>
-            </div>
             <h2 id="booking-step-3-title" style="text-align: center;">Build Your Service</h2>
             <div id="booking-selected-address" style="text-align: center; margin: 10px 0; padding: 8px; background-color: #f0f5fa; border-radius: 4px; font-size: 0.9rem;">
               <strong style="color: #555;">Service Address:</strong> <span id="address-display-text"></span>

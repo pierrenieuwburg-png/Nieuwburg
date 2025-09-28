@@ -11,6 +11,8 @@ import json
 import os
 import re
 import uuid
+import requests
+from markupsafe import Markup
 from wtforms import SelectField, DateField, FieldList, FormField, FloatField, TimeField, SelectMultipleField
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin, LoginManager, login_user, logout_user, login_required, current_user
@@ -123,6 +125,8 @@ class QuoteRequest(db.Model):
     status = db.Column(db.String(20), default='Pending')
     request_date = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    total_price = db.Column(db.Float)
+    service_details = db.Column(db.Text)
 
 class Quote(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -235,7 +239,21 @@ class Booking(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id)) 
+    return db.session.get(User, int(user_id))
+
+# app.py (add with other models)
+
+class Post(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    excerpt = db.Column(db.String(300), nullable=True)
+    created_date = db.Column(db.DateTime, default=datetime.utcnow)
+    author_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    author = db.relationship('User', backref=db.backref('posts', lazy=True))
+
+    def __repr__(self):
+        return f'<Post {self.title}>'
 
 # --- ADMIN CLIENT MANAGEMENT ---
 @app.route('/admin/clients')
@@ -449,7 +467,6 @@ def admin_edit_staff(user_id):
         id_number = form.id_number.data
         staff_member.profile.id_number = id_number
 
-        # This is the line that was missing
         staff_member.profile.notes = request.form.get('notes')
 
         staff_member.profile.service_frequency = request.form.get('service_frequency')
@@ -549,6 +566,12 @@ class EditClientForm(FlaskForm):
     address = TextAreaField('Physical Address', validators=[Length(max=500)])
     submit = SubmitField('Update Client')
 
+class PostForm(FlaskForm):
+    title = StringField('Title', validators=[DataRequired(), Length(max=200)])
+    content = TextAreaField('Full Content', validators=[DataRequired()])
+    excerpt = TextAreaField('Excerpt (Short Summary)', validators=[Optional(), Length(max=300)])
+    submit = SubmitField('Save Post')
+
 class QuoteLineItemForm(Form):
     description = TextAreaField('Description', validators=[DataRequired()])
     quantity = FloatField('Quantity', validators=[DataRequired()], default=1)
@@ -625,6 +648,13 @@ class ServicePriceForm(FlaskForm):
     ], validators=[DataRequired()])
     price = FloatField('Price (R)', validators=[DataRequired()])
     submit = SubmitField('Add Price')
+
+def nl2br(value):
+    """Converts newlines in a string to HTML line breaks."""
+    # Use Markup from the new import
+    return Markup(str(value).replace('\n', '<br>'))
+
+app.jinja_env.filters['nl2br'] = nl2br
 
 # --- AUTHENTICATION & PROFILE ROUTES ---
 @app.before_request
@@ -796,7 +826,6 @@ def view_profile():
 
 @app.route('/delete_account', methods=['POST'])
 @login_required
-#@csrf.exempt
 def delete_account():
     user_to_delete = db.session.get(User, current_user.id) 
     
@@ -973,6 +1002,62 @@ def get_next_quote_number():
     last_num = int(last_quote.quote_number.split('-')[1])
     new_num = last_num + 1
     return f"QU-{new_num:04d}"
+
+@app.route('/admin/blog')
+@login_required
+def admin_blog():
+    if current_user.role != 'admin': return redirect(url_for('index'))
+    posts = Post.query.order_by(Post.created_date.desc()).all()
+    return render_template('admin_blog.html', posts=posts)
+
+@app.route('/admin/blog/add', methods=['GET', 'POST'])
+@login_required
+def admin_add_post():
+    if current_user.role != 'admin': return redirect(url_for('index'))
+    form = PostForm()
+    if form.validate_on_submit():
+        new_post = Post(
+            title=form.title.data,
+            content=form.content.data,
+            excerpt=form.excerpt.data,
+            author_id=current_user.id
+        )
+        db.session.add(new_post)
+        db.session.commit()
+        flash('Blog post has been created.', 'success')
+        return redirect(url_for('admin_blog'))
+    return render_template('admin_edit_post.html', form=form, title="Create New Post")
+
+@app.route('/admin/blog/edit/<int:post_id>', methods=['GET', 'POST'])
+@login_required
+def admin_edit_post(post_id):
+    if current_user.role != 'admin': return redirect(url_for('index'))
+    post = db.session.get(Post, post_id)
+    if not post:
+        flash('Post not found.', 'error')
+        return redirect(url_for('admin_blog'))
+    
+    form = PostForm(obj=post)
+    if form.validate_on_submit():
+        post.title = form.title.data
+        post.content = form.content.data
+        post.excerpt = form.excerpt.data
+        db.session.commit()
+        flash('Blog post has been updated.', 'success')
+        return redirect(url_for('admin_blog'))
+        
+    return render_template('admin_edit_post.html', form=form, title=f"Edit: {post.title}")
+
+@app.route('/admin/blog/delete/<int:post_id>', methods=['POST'])
+@login_required
+def admin_delete_post(post_id):
+    if current_user.role != 'admin': return redirect(url_for('index'))
+    post = db.session.get(Post, post_id)
+    if post:
+        db.session.delete(post)
+        db.session.commit()
+        flash('Post has been deleted.', 'success')
+    return redirect(url_for('admin_blog'))
 
 @app.route('/admin/quotes')
 @login_required
@@ -1578,7 +1663,15 @@ BLOG_POSTS = []
 @app.route('/')
 def index(): return render_template('index.html')
 @app.route('/blog')
-def blog(): return render_template('blog.html')
+def blog():
+    posts = Post.query.order_by(Post.created_date.desc()).all()
+    return render_template('blog.html', posts=posts)
+@app.route('/blog/<int:post_id>')
+def post_detail(post_id):
+    post = db.session.get(Post, post_id)
+    if not post:
+        return redirect(url_for('blog'))
+    return render_template('post_detail.html', post=post)
 @app.route('/faq')
 def faq(): return render_template('faq.html')
 @app.route('/gallery')
@@ -1604,9 +1697,15 @@ def api_quote():
 
 @app.route('/api/posts')
 def api_posts():
-    return jsonify([{"id": p["id"], "title": p["title"], "excerpt": p["excerpt"], "date": p["date"]} for p in BLOG_POSTS])
+    posts = Post.query.order_by(Post.created_date.desc()).all()
+    posts_data = [{
+        "id": post.id,
+        "title": post.title,
+        "excerpt": post.excerpt or (post.content[:150] + '...'),
+        "date": post.created_date.strftime('%d %B %Y')
+    } for post in posts]
+    return jsonify(posts_data)
 
-@csrf.exempt
 @app.route('/api/staff_apply', methods=['POST'])
 def api_staff_apply():
     data = request.json or {}
@@ -1709,38 +1808,54 @@ def api_availability(date_str):
 
     return jsonify(available_slots)
 
+# app.py
+
 @app.route('/api/create_booking', methods=['POST'])
-@csrf.exempt # Exempt this public-facing API from CSRF
 def create_booking():
     data = request.json
     try:
-        # Extract all the data from the incoming request
-        service_details_json = json.dumps(data.get('services'))
-        booking_time_dt = datetime.strptime(data.get('time'), '%H:%M').time()
+        customer_email = data.get('email')
+        
+        # Check if user exists, otherwise create a temporary guest user
+        user = User.query.filter_by(email=customer_email).first()
+        if not user:
+            guest_password = str(uuid.uuid4()) # Generate a secure random password
+            user = User(email=customer_email, role='client')
+            user.set_password(guest_password)
+            db.session.add(user)
+            
+            profile = Profile(
+                user=user,
+                full_name=data.get('name'),
+                phone_number=data.get('phone'),
+                address=data.get('address')
+            )
+            db.session.add(profile)
+            db.session.flush() # Flush to get user ID before committing
 
-        new_booking = Booking(
-            customer_name=data.get('name'),
-            customer_email=data.get('email'),
-            customer_phone=data.get('phone'),
+        # Create a new QuoteRequest from the booking data
+        new_request = QuoteRequest(
+            user_id=user.id,
+            primary_service=data.get('categoryName'),
+            property_type=data.get('frequency'),
             address=data.get('address'),
-            booking_date=datetime.strptime(data.get('date'), '%Y-%m-%d').date(),
-            booking_time=booking_time_dt,
             total_price=float(data.get('totalPrice')),
-            estimated_time_mins=int(data.get('totalTime')),
-            service_details=service_details_json
+            service_details=json.dumps(data.get('services')),
+            status='Pending'
         )
-        db.session.add(new_booking)
+        
+        db.session.add(new_request)
         db.session.commit()
 
-        # In the future, this is where we would generate and return a payment link.
         return jsonify({
             'status': 'ok',
-            'message': 'Thank you! Your booking is pending confirmation. We will be in contact shortly to arrange payment.',
-            'booking_id': new_booking.id
+            'message': 'Thank you! Your booking request has been received. We will contact you shortly to confirm.',
+            'booking_id': new_request.id
         })
     except Exception as e:
-        print(f"Error creating booking: {e}")
-        return jsonify({'status': 'error', 'message': 'Could not create booking.'}), 500
+        db.session.rollback()
+        print(f"Error creating booking request: {e}")
+        return jsonify({'status': 'error', 'message': 'Could not process your booking request.'}), 500
 
 # --- CONTEXT PROCESSOR & MAIN EXECUTION ---
 @app.context_processor
@@ -1751,6 +1866,114 @@ def inject_now():
 @app.context_processor
 def inject_google_maps_api_key():
     return dict(google_maps_api_key=os.environ.get('GOOGLE_MAPS_API_KEY'))
+
+# app.py
+
+@app.route('/initialize-payment', methods=['POST'])
+def initialize_payment():
+    print(f"DEBUG: Using Paystack Secret Key starting with: {os.environ.get('PAYSTACK_SECRET_KEY')[:10]}")
+    data = request.json
+    url = "https://api.paystack.co/transaction/initialize"
+    
+    # Paystack amount is in kobo (the lowest denomination), so multiply by 100
+    amount_in_kobo = int(float(data.get('totalPrice')) * 100)
+
+    payload = {
+        "email": data.get('email'),
+        "amount": amount_in_kobo,
+        "currency": "ZAR",  # <-- ADD THIS LINE
+        "metadata": {
+            "booking_details": data # Store all booking data in metadata
+        }
+    }
+    headers = {
+        "Authorization": f"Bearer {os.environ.get('PAYSTACK_SECRET_KEY')}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        response_data = response.json()
+        if response_data['status']:
+            return jsonify(response_data['data'])
+        else:
+            # More detailed error logging
+            print("Paystack Error:", response_data.get('message'))
+            return jsonify({'error': 'Could not initialize payment'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# app.py
+
+# app.py
+
+@app.route('/payment-callback')
+def payment_callback():
+    reference = request.args.get('reference')
+    url = f"https://api.paystack.co/transaction/verify/{reference}"
+    headers = {
+        "Authorization": f"Bearer {os.environ.get('PAYSTACK_SECRET_KEY')}"
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        verification_data = response.json()
+
+        if verification_data.get('data', {}).get('status') == 'success':
+            booking_data = verification_data['data']['metadata']['booking_details']
+            
+            # Find or create the user and their profile (this part is correct)
+            user = User.query.filter_by(email=booking_data.get('email')).first()
+            if not user:
+                guest_password = str(uuid.uuid4())
+                user = User(email=booking_data.get('email'), role='client')
+                user.set_password(guest_password)
+                db.session.add(user)
+                profile = Profile(user=user, full_name=booking_data.get('name'), phone_number=booking_data.get('phone'), address=booking_data.get('address'))
+                db.session.add(profile)
+                db.session.flush()
+
+            # Create the confirmed QuoteRequest
+            new_request = QuoteRequest(
+                user_id=user.id,
+                primary_service=booking_data.get('categoryName'),
+                property_type=booking_data.get('frequency'),
+                # The incorrect 'address' line has been removed from here
+                total_price=float(booking_data.get('totalPrice')),
+                service_details=json.dumps(booking_data.get('services')),
+                status='Confirmed'
+            )
+            db.session.add(new_request)
+            
+            # Create the Job record
+            try:
+                job_date = datetime.strptime(booking_data.get('date'), '%Y-%m-%d').date()
+                job_time = datetime.strptime(booking_data.get('time'), '%H:%M').time()
+            except (ValueError, TypeError):
+                job_date = date.today()
+                job_time = None
+
+            new_job = Job(
+                quote_request=new_request,
+                scheduled_date=job_date,
+                start_time=job_time,
+                status='Scheduled'
+            )
+            db.session.add(new_job)
+            
+            db.session.commit()
+            
+            flash('Payment successful! Your booking is confirmed.', 'success')
+            return redirect(url_for('client_dashboard'))
+        else:
+            flash('Payment verification failed. Please contact support.', 'error')
+            return redirect(url_for('index'))
+            
+    except Exception as e:
+        db.session.rollback()
+        print(f"CRITICAL ERROR in payment_callback: {e}") 
+        flash(f'A critical error occurred during payment verification: {str(e)}', 'error')
+        return redirect(url_for('index'))
 
 if __name__ == '__main__':
     with app.app_context():

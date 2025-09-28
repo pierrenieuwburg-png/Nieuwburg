@@ -1,0 +1,28 @@
+{% extends "admin_base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>{{ title }}</h1>
+  <a href="{{ url_for('admin_blog') }}" class="cta-outline">Back to Blog List</a>
+</div>
+
+<div class="admin-section">
+  <form method="POST" class="profile-form" style="max-width: 800px; margin: 0;">
+      {{ form.hidden_tag() }}
+      <div class="form-group">
+          {{ form.title.label }}
+          {{ form.title(class="form-control") }}
+      </div>
+      <div class="form-group">
+          {{ form.excerpt.label }}
+          {{ form.excerpt(rows=3, class="form-control") }}
+      </div>
+      <div class="form-group">
+          {{ form.content.label }}
+          {{ form.content(rows=15, class="form-control") }}
+      </div>
+      {{ form.submit(class="cta") }}
+  </form>
+</div>
+{% endblock %}

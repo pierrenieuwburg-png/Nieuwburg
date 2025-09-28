@@ -1,0 +1,42 @@
+{% extends "admin_base.html" %}
+{% block title %}Manage Blog Posts{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+    <h1>Blog Management</h1>
+    <a href="{{ url_for('admin_add_post') }}" class="cta">Add New Post</a>
+</div>
+
+<div class="admin-section">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Date Created</th>
+                <th style="width: 150px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for post in posts %}
+            <tr>
+                <td><strong>{{ post.title }}</strong></td>
+                <td>{{ post.author.profile.full_name or post.author.email }}</td>
+                <td>{{ post.created_date.strftime('%d %b %Y') }}</td>
+                <td class="action-buttons">
+                    <a href="{{ url_for('admin_edit_post', post_id=post.id) }}" class="cta-outline-small">Edit</a>
+                    <form action="{{ url_for('admin_delete_post', post_id=post.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this post?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="cta-danger-small">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" style="text-align: center; padding: 20px;">No blog posts have been created yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

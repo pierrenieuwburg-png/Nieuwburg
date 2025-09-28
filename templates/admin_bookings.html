@@ -71,31 +71,41 @@
 </div>
 
 <div class="admin-section">
-    <h2>New Quote Requests</h2>
+    <h2>New Confirmed Bookings</h2>
     <table class="data-table">
         <thead>
             <tr>
-                <th>Received</th>
+                <th>Confirmed On</th>
                 <th>Client</th>
-                <th>Service</th>
-                <th>Frequency</th>
+                <th>Service Details</th>
+                <th>Address</th>
+                <th>Final Price</th>
                 <th>Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for req in requests %}
+            {# This now filters for only confirmed requests #}
+            {% if req.status == 'Confirmed' %}
             <tr>
                 <td>{{ req.request_date.strftime('%d %b %Y, %H:%M') }}</td>
-                <td>{{ req.user.profile.full_name or req.user.email }}</td>
-                <td>{{ req.primary_service }}</td>
-                <td>{{ req.service_frequency }}</td>
                 <td>
-                    <a href="{{ url_for('admin_create_job_from_request', request_id=req.id) }}" class="cta-outline-small">Schedule Job</a>
+                    <strong>{{ req.user.profile.full_name or req.user.email }}</strong><br>
+                    <small>{{ req.user.profile.phone_number or 'No phone' }}</small>
+                </td>
+                <td>
+                    <strong>{{ req.primary_service }}</strong> ({{ req.property_type }})
+                </td>
+                <td>{{ req.address }}</td>
+                <td><strong>R{{ "%.2f"|format(req.total_price) if req.total_price else 'N/A' }}</strong></td>
+                <td>
+                    <a href="{{ url_for('admin_create_job_from_request', request_id=req.id) }}" class="cta-outline-small">View & Schedule</a>
                 </td>
             </tr>
+            {% endif %}
             {% else %}
             <tr>
-                <td colspan="5" style="text-align: center; padding: 20px;">There are no new quote requests.</td>
+                <td colspan="6" style="text-align: center; padding: 20px;">There are no new confirmed bookings.</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -123,7 +133,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- AJAX Status Update Logic ---
     const statusDropdowns = document.querySelectorAll('.status-update-dropdown');
-    // This token is now correctly sourced from admin_base.html
     const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
     const statusColors = {
         'Scheduled': '#007bff',
@@ -153,14 +162,12 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(data => {
                 if (data.status === 'ok') {
-                    // Update the status badge in the table
                     const badge = document.getElementById(`status-badge-${jobId}`);
                     if (badge) {
                         badge.textContent = data.new_status;
                         badge.className = `booking-status status-${data.new_status.toLowerCase()}`;
                     }
 
-                    // --- CALENDAR UPDATE ---
                     const calendarEvent = calendar.getEventById(jobId);
                     if (calendarEvent) {
                         const newTitle = calendarEvent.title.replace(/^(Scheduled|In-Progress|Completed|Cancelled)/, data.new_status);
@@ -169,7 +176,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         calendarEvent.setProp('borderColor', statusColors[data.new_status] || '#6c757d');
                     }
                     
-                    // If job is completed or cancelled, fade and remove it from the "Current Jobs" table
                     if (data.new_status === 'Completed' || data.new_status === 'Cancelled') {
                         const row = document.getElementById(`job-row-${jobId}`);
                         if (row) {
@@ -180,7 +186,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 } else {
                     alert('Error: ' + data.message);
-                    this.value = document.getElementById(`status-badge-${jobId}`).textContent; // Revert dropdown on failure
+                    this.value = document.getElementById(`status-badge-${jobId}`).textContent;
                 }
             })
             .catch(error => {

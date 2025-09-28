@@ -1,12 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Gallery - Nieuwburg Blitz{% endblock %}
+{% block title %}The Blitz Blog - Nieuwburg Blitz{% endblock %}
 {% block content %}
 <section class="container page-blog">
   <div style="text-align: center; margin-bottom: 40px;">
     <h1 style="font-size: 2.5rem; margin-bottom: 10px;">The Blitz Blog</h1>
     <p style="font-size: 1.1rem; color: #555;">Cleaning Tips, Company News, and More</p>
   </div>
-  <div id="posts" class="posts-grid">
-    </div>
+  <div class="posts-grid">
+    {% for post in posts %}
+    <article class="post-card">
+      <h3><a href="{{ url_for('post_detail', post_id=post.id) }}">{{ post.title }}</a></h3>
+      <p>{{ post.excerpt or post.content[:150] + '...' }}</p>
+      <time>{{ post.created_date.strftime('%d %B %Y') }}</time>
+    </article>
+    {% else %}
+    <p style="text-align: center; grid-column: 1 / -1;">There are no blog posts yet. Check back soon!</p>
+    {% endfor %}
+  </div>
 </section>
 {% endblock %}
