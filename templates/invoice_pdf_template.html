@@ -72,6 +72,9 @@
         .page-break {
             page-break-before: always;
         }
+        .payment-advice {
+            padding-top: 1.5cm;
+        }
         .terms-section-view {
             padding-top: 1cm;
         }
@@ -93,8 +96,18 @@
     </style>
 </head>
 <body>
+    {# Set the variables for the first page #}
     {% set doc_type = 'Invoice' %}
     {% set document = invoice %}
     {% include '_pdf_view.html' %}
+
+    {# Add the new page for payment advice #}
+    <div class="page-break"></div>
+    <div class="payment-advice">
+        <h1>Payment Advice</h1>
+        {% if payment_advice %}
+        <div class="bank-details" style="white-space: pre-wrap;">{{ payment_advice.value }}</div>
+        {% endif %}
+    </div>
 </body>
 </html>

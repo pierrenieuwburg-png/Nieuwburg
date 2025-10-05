@@ -165,6 +165,8 @@ class Invoice(db.Model):
     due_date = db.Column(db.Date)
     subtotal = db.Column(db.Float, default=0.0)
     total = db.Column(db.Float, default=0.0)
+    discount_value = db.Column(db.Float, default=0.0)
+    discount_type = db.Column(db.String(10), default='R') # Can be 'R' or '%'
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     line_items = db.relationship('InvoiceLineItem', backref='invoice', lazy=True, cascade="all, delete-orphan")
 
@@ -266,10 +268,22 @@ class ActivityLog(db.Model):
 
     def __repr__(self):
         return f'<ActivityLog {self.activity_type}>'
+    
+class Settings(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(50), unique=True, nullable=False)
+    value = db.Column(db.Text, nullable=False)
 
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
+
+@app.context_processor
+def inject_utility_functions():
+    return dict(
+        get_next_quote_number=get_next_quote_number,
+        get_next_invoice_number=get_next_invoice_number
+    )
 
 # --- ADMIN CLIENT MANAGEMENT ---
 @app.route('/admin/clients')
@@ -595,6 +609,7 @@ class QuoteLineItemForm(FlaskForm):
 
 class GuestQuoteForm(FlaskForm):
     client_or_guest_name = StringField('Client Name', validators=[DataRequired()])
+    quote_number = StringField('Quote Number', validators=[Optional()])
     quote_date = DateField('Quote Date', default=date.today, validators=[DataRequired()])
     expiry_date = DateField('Expiry Date', validators=[Optional()])
     line_items = FieldList(FormField(QuoteLineItemForm), min_entries=1)
@@ -607,9 +622,14 @@ class InvoiceLineItemForm(FlaskForm):
 
 class InvoiceForm(FlaskForm):
     client_or_guest_name = StringField('Client Name', validators=[DataRequired()])
+    invoice_number = StringField('Invoice Number', validators=[Optional()])
     invoice_date = DateField('Invoice Date', default=date.today, validators=[DataRequired()])
     due_date = DateField('Due Date', validators=[Optional()])
+    discount_value = FloatField('Discount', validators=[Optional()], default=0.0)
+    discount_type = SelectField('Type', choices=[('R', 'R'), ('%', '%')], default='R')
+    discount = FloatField('Discount (R)', validators=[Optional()], default=0.0) 
     line_items = FieldList(FormField(InvoiceLineItemForm), min_entries=1)
+    payment_advice = TextAreaField('Payment Advice', validators=[Optional()])
     submit = SubmitField('Create Invoice')
 
 class JobForm(FlaskForm):
@@ -1013,11 +1033,16 @@ def staff_dashboard():
 
 def get_next_quote_number():
     last_quote = Quote.query.order_by(Quote.id.desc()).first()
-    if not last_quote:
+    if not last_quote or '-' not in last_quote.quote_number:
+        # If no last quote, or if it has a bad format, start over
         return "QU-0051"
-    last_num = int(last_quote.quote_number.split('-')[1])
-    new_num = last_num + 1
-    return f"QU-{new_num:04d}"
+    try:
+        last_num = int(last_quote.quote_number.split('-')[1])
+        new_num = last_num + 1
+        return f"QU-{new_num:04d}"
+    except (IndexError, ValueError):
+        # Fallback in case of any other parsing error
+        return "QU-0051"
 
 @app.route('/admin/blog')
 @login_required
@@ -1091,41 +1116,45 @@ def admin_create_quote():
     client_list = User.query.filter_by(role='client').all()
 
     if form.validate_on_submit():
-        client_name_input = form.client_or_guest_name.data
-        user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
-
-        new_quote_number = get_next_quote_number()
-        quote = Quote(
-            quote_number=new_quote_number,
-            quote_date=form.quote_date.data,
-            expiry_date=form.expiry_date.data,
-            status='Draft'
-        )
-
-        if user:
-            quote.user_id = user.id
+        number_to_use = form.quote_number.data or get_next_quote_number()
+        
+        # Check for duplicates
+        if Quote.query.filter_by(quote_number=number_to_use).first():
+            form.quote_number.errors.append(f"Quote number '{number_to_use}' is already in use.")
         else:
-            quote.guest_name = client_name_input
+            client_name_input = form.client_or_guest_name.data
+            user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
 
-        db.session.add(quote)
-        db.session.flush()
+            quote = Quote(
+                quote_number=number_to_use,
+                quote_date=form.quote_date.data,
+                expiry_date=form.expiry_date.data,
+                status='Draft'
+            )
+            # ... (rest of the function is the same)
+            if user:
+                quote.user_id = user.id
+            else:
+                quote.guest_name = client_name_input
 
-        subtotal = 0
-        for item_data in form.line_items.data:
-            # THIS IS THE FIX: Remove the CSRF token before creating the object
-            item_data.pop('csrf_token', None)
-            if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
-                amount = item_data['quantity'] * item_data['unit_price']
-                line_item = QuoteLineItem(quote_id=quote.id, **item_data, amount=amount)
-                db.session.add(line_item)
-                subtotal += amount
-        
-        quote.subtotal = subtotal
-        quote.total = subtotal
-        
-        db.session.commit()
-        flash(f'Draft quote {new_quote_number} created successfully.', 'success')
-        return redirect(url_for('admin_quotes'))
+            db.session.add(quote)
+            db.session.flush()
+            # ... (line item logic) ...
+            subtotal = 0
+            for item_data in form.line_items.data:
+                item_data.pop('csrf_token', None)
+                if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
+                    amount = item_data['quantity'] * item_data['unit_price']
+                    line_item = QuoteLineItem(quote_id=quote.id, **item_data, amount=amount)
+                    db.session.add(line_item)
+                    subtotal += amount
+            
+            quote.subtotal = subtotal
+            quote.total = subtotal
+            
+            db.session.commit()
+            flash(f'Draft quote {quote.quote_number} created successfully.', 'success')
+            return redirect(url_for('admin_quotes'))
 
     context = {
         'form': form,
@@ -1161,38 +1190,44 @@ def admin_edit_quote(quote_id):
     client_list = User.query.filter_by(role='client').all()
 
     if form.validate_on_submit():
-        client_name_input = form.client_or_guest_name.data
-        user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
-
-        quote.quote_date = form.quote_date.data
-        quote.expiry_date = form.expiry_date.data
-
-        if user:
-            quote.user_id = user.id
-            quote.guest_name = None
+        new_number = form.quote_number.data
+        # Check for duplicates only if the number has changed
+        if new_number != quote.quote_number and Quote.query.filter_by(quote_number=new_number).first():
+            form.quote_number.errors.append(f"Quote number '{new_number}' is already in use.")
         else:
-            quote.user_id = None
-            quote.guest_name = client_name_input
+            client_name_input = form.client_or_guest_name.data
+            user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
 
-        QuoteLineItem.query.filter_by(quote_id=quote.id).delete()
-        subtotal = 0
-        for item_data in form.line_items.data:
-            # THIS IS THE FIX: Remove the CSRF token before creating the object
-            item_data.pop('csrf_token', None)
-            if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
-                amount = item_data['quantity'] * item_data['unit_price']
-                line_item = QuoteLineItem(quote_id=quote.id, **item_data, amount=amount)
-                db.session.add(line_item)
-                subtotal += amount
-        
-        quote.subtotal = subtotal
-        quote.total = subtotal
+            quote.quote_number = new_number
+            quote.quote_date = form.quote_date.data
+            quote.expiry_date = form.expiry_date.data
+            # ... (rest of the function is the same) ...
+            if user:
+                quote.user_id = user.id
+                quote.guest_name = None
+            else:
+                quote.user_id = None
+                quote.guest_name = client_name_input
+            
+            QuoteLineItem.query.filter_by(quote_id=quote.id).delete()
+            subtotal = 0
+            for item_data in form.line_items.data:
+                item_data.pop('csrf_token', None)
+                if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
+                    amount = item_data['quantity'] * item_data['unit_price']
+                    line_item = QuoteLineItem(quote_id=quote.id, **item_data, amount=amount)
+                    db.session.add(line_item)
+                    subtotal += amount
+            
+            quote.subtotal = subtotal
+            quote.total = subtotal
 
-        db.session.commit()
-        flash(f'Quote {quote.quote_number} updated successfully.', 'success')
-        return redirect(url_for('admin_quotes'))
+            db.session.commit()
+            flash(f'Quote {quote.quote_number} updated successfully.', 'success')
+            return redirect(url_for('admin_quotes'))
 
     if request.method == 'GET':
+        form.quote_number.data = quote.quote_number
         if quote.user:
             form.client_or_guest_name.data = quote.user.profile.full_name
         else:
@@ -1255,11 +1290,16 @@ def admin_download_quote_pdf(quote_id):
 
 def get_next_invoice_number():
     last_invoice = Invoice.query.order_by(Invoice.id.desc()).first()
-    if not last_invoice:
+    if not last_invoice or '-' not in last_invoice.invoice_number:
+        # If no last invoice, or if it has a bad format, start over
         return "INV-0061"
-    last_num = int(last_invoice.invoice_number.split('-')[1])
-    new_num = last_num + 1
-    return f"INV-{new_num:04d}"
+    try:
+        last_num = int(last_invoice.invoice_number.split('-')[1])
+        new_num = last_num + 1
+        return f"INV-{new_num:04d}"
+    except (IndexError, ValueError):
+        # Fallback in case of any other parsing error
+        return "INV-0061"
 
 @app.route('/admin/invoices')
 @login_required
@@ -1276,38 +1316,62 @@ def admin_create_invoice():
     form = InvoiceForm()
     client_list = User.query.filter_by(role='client').all()
 
+    payment_advice_setting = Settings.query.filter_by(key='payment_advice').first()
+    if not payment_advice_setting:
+        default_advice = "Please use your Invoice Number as the payment reference.\n\nBank: First National Bank\nAccount Name: Nieuwburg Pty (ltd)\nAccount Number: 63157242222"
+        payment_advice_setting = Settings(key='payment_advice', value=default_advice)
+        db.session.add(payment_advice_setting)
+        db.session.commit()
+
     if form.validate_on_submit():
-        client_name_input = form.client_or_guest_name.data
-        user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
-
-        if not user:
-            form.client_or_guest_name.errors.append(f"Client '{client_name_input}' not found. An invoice must be for an existing client.")
+        # THIS IS THE FIX: Only update the setting if new, non-empty data was submitted.
+        if form.payment_advice.data is not None and form.payment_advice.data != payment_advice_setting.value:
+            payment_advice_setting.value = form.payment_advice.data
+        
+        number_to_use = form.invoice_number.data or get_next_invoice_number()
+        if Invoice.query.filter_by(invoice_number=number_to_use).first():
+            form.invoice_number.errors.append(f"Invoice number '{number_to_use}' is already in use.")
         else:
-            new_invoice_number = get_next_invoice_number()
-            invoice = Invoice(
-                invoice_number=new_invoice_number,
-                user_id=user.id,
-                invoice_date=form.invoice_date.data,
-                due_date=form.due_date.data
-            )
-            db.session.add(invoice)
-            db.session.flush()
+            client_name_input = form.client_or_guest_name.data
+            user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
 
-            subtotal = 0
-            for item_data in form.line_items.data:
-                # THIS IS THE FIX: Remove the CSRF token before creating the object
-                item_data.pop('csrf_token', None)
-                if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
-                    amount = item_data['quantity'] * item_data['unit_price']
-                    db.session.add(InvoiceLineItem(invoice_id=invoice.id, **item_data, amount=amount))
-                    subtotal += amount
-            
-            invoice.subtotal = subtotal
-            invoice.total = subtotal
+            if not user:
+                form.client_or_guest_name.errors.append(f"Client '{client_name_input}' not found.")
+            else:
+                invoice = Invoice(
+                    invoice_number=number_to_use,
+                    user_id=user.id,
+                    invoice_date=form.invoice_date.data,
+                    due_date=form.due_date.data,
+                    discount_value=form.discount_value.data or 0.0,
+                    discount_type=form.discount_type.data
+                )
+                db.session.add(invoice)
+                db.session.flush()
 
-            db.session.commit()
-            flash(f'Invoice {new_invoice_number} created successfully.', 'success')
-            return redirect(url_for('admin_invoices'))
+                subtotal = 0
+                for item_data in form.line_items.data:
+                    item_data.pop('csrf_token', None)
+                    if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
+                        amount = item_data['quantity'] * item_data['unit_price']
+                        db.session.add(InvoiceLineItem(invoice_id=invoice.id, **item_data, amount=amount))
+                        subtotal += amount
+                
+                invoice.subtotal = subtotal
+                
+                discount_amount = 0
+                if invoice.discount_type == '%' and invoice.discount_value > 0:
+                    discount_amount = (subtotal * invoice.discount_value) / 100
+                else:
+                    discount_amount = invoice.discount_value or 0.0
+                
+                invoice.total = subtotal - discount_amount
+
+                db.session.commit()
+                flash(f'Invoice {invoice.invoice_number} created successfully.', 'success')
+                return redirect(url_for('admin_invoices'))
+    
+    form.payment_advice.data = payment_advice_setting.value
 
     context = {
         'form': form,
@@ -1320,6 +1384,7 @@ def admin_create_invoice():
     }
     return render_template('create_invoice.html', **context)
 
+
 @app.route('/admin/invoices/view/<int:invoice_id>')
 @login_required
 def admin_view_invoice(invoice_id):
@@ -1328,7 +1393,10 @@ def admin_view_invoice(invoice_id):
     if not invoice:
         flash('Invoice not found.', 'error')
         return redirect(url_for('admin_invoices'))
-    return render_template('view_invoice.html', invoice=invoice)
+    
+    payment_advice = Settings.query.filter_by(key='payment_advice').first()
+    
+    return render_template('view_invoice.html', invoice=invoice, payment_advice=payment_advice)
 
 @app.route('/admin/invoices/edit/<int:invoice_id>', methods=['GET', 'POST'])
 @login_required
@@ -1341,37 +1409,60 @@ def admin_edit_invoice(invoice_id):
 
     form = InvoiceForm(obj=invoice)
     client_list = User.query.filter_by(role='client').all()
+    
+    payment_advice_setting = Settings.query.filter_by(key='payment_advice').first()
 
     if form.validate_on_submit():
-        client_name_input = form.client_or_guest_name.data
-        user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
-
-        if not user:
-            form.client_or_guest_name.errors.append(f"Client '{client_name_input}' not found.")
+        # THIS IS THE FIX: Only update the setting if new, non-empty data was submitted.
+        if form.payment_advice.data is not None and form.payment_advice.data != payment_advice_setting.value:
+            payment_advice_setting.value = form.payment_advice.data
+        
+        new_number = form.invoice_number.data
+        if new_number != invoice.invoice_number and Invoice.query.filter_by(invoice_number=new_number).first():
+            form.invoice_number.errors.append(f"Invoice number '{new_number}' is already in use.")
         else:
-            invoice.user_id = user.id
-            invoice.invoice_date = form.invoice_date.data
-            invoice.due_date = form.due_date.data
+            client_name_input = form.client_or_guest_name.data
+            user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
 
-            InvoiceLineItem.query.filter_by(invoice_id=invoice.id).delete()
-            subtotal = 0
-            for item_data in form.line_items.data:
-                # THIS IS THE FIX: Remove the CSRF token before creating the object
-                item_data.pop('csrf_token', None)
-                if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
-                    amount = item_data['quantity'] * item_data['unit_price']
-                    db.session.add(InvoiceLineItem(invoice_id=invoice.id, **item_data, amount=amount))
-                    subtotal += amount
-            
-            invoice.subtotal = subtotal
-            invoice.total = subtotal
+            if not user:
+                form.client_or_guest_name.errors.append(f"Client '{client_name_input}' not found.")
+            else:
+                invoice.invoice_number = new_number
+                invoice.user_id = user.id
+                invoice.invoice_date = form.invoice_date.data
+                invoice.due_date = form.due_date.data
+                invoice.discount_value = form.discount_value.data or 0.0
+                invoice.discount_type = form.discount_type.data
+                
+                InvoiceLineItem.query.filter_by(invoice_id=invoice.id).delete()
+                subtotal = 0
+                for item_data in form.line_items.data:
+                    item_data.pop('csrf_token', None)
+                    if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
+                        amount = item_data['quantity'] * item_data['unit_price']
+                        db.session.add(InvoiceLineItem(invoice_id=invoice.id, **item_data, amount=amount))
+                        subtotal += amount
+                
+                invoice.subtotal = subtotal
 
-            db.session.commit()
-            flash(f'Invoice {invoice.invoice_number} updated successfully.', 'success')
-            return redirect(url_for('admin_invoices'))
+                discount_amount = 0
+                if invoice.discount_type == '%' and invoice.discount_value > 0:
+                    discount_amount = (subtotal * invoice.discount_value) / 100
+                else:
+                    discount_amount = invoice.discount_value or 0.0
+
+                invoice.total = subtotal - discount_amount
+
+                db.session.commit()
+                flash(f'Invoice {invoice.invoice_number} updated successfully.', 'success')
+                return redirect(url_for('admin_invoices'))
 
     if request.method == 'GET':
+        form.invoice_number.data = invoice.invoice_number
         form.client_or_guest_name.data = invoice.user.profile.full_name
+        form.discount_value.data = invoice.discount_value or 0.0
+        form.discount_type.data = invoice.discount_type
+        form.payment_advice.data = payment_advice_setting.value
 
     context = {
         'form': form,
@@ -1406,9 +1497,13 @@ def admin_download_invoice_pdf(invoice_id):
         flash('Invoice not found.', 'error')
         return redirect(url_for('admin_invoices'))
 
-    # This line provides the logo path to the template
     logo_path = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
-    rendered_template = render_template('invoice_pdf_template.html', invoice=invoice, logo_path=logo_path)
+    
+    # ADD THIS LINE to get the payment advice
+    payment_advice = Settings.query.filter_by(key='payment_advice').first()
+
+    # ADD 'payment_advice' to the context
+    rendered_template = render_template('invoice_pdf_template.html', invoice=invoice, logo_path=logo_path, payment_advice=payment_advice)
     
     pdf_result = BytesIO()
     pisa.CreatePDF(BytesIO(rendered_template.encode('UTF-8')), dest=pdf_result)

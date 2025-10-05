@@ -61,6 +61,12 @@
             <span>Subtotal</span>
             <span>R{{ "%.2f"|format(document.subtotal) }}</span>
         </div>
+            {% if document.discount and document.discount > 0 %}
+        <div class="totals-row">
+            <span>Discount</span>
+            <span>- R{{ "%.2f"|format(document.discount) }}</span>
+        </div>
+            {% endif %}
         <div class="totals-row grand-total">
             <span>TOTAL</span>
             <span>R{{ "%.2f"|format(document.total) }}</span>
@@ -95,6 +101,12 @@
             <strong>Branch Code:</strong> 260217</p>
         </div>
         <p>For any questions regarding this quote, please contact us at hello@nieuwburg.co.za or 0826184424.</p>
+    </div>
+    {% endif %}
+    {% if doc_type == 'Invoice' and payment_advice %}
+    <div class="terms-section-view">
+        <h2>Payment Advice</h2>
+        <div class="bank-details" style="white-space: pre-wrap;">{{ payment_advice.value }}</div>
     </div>
     {% endif %}
 </div>

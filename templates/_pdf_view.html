@@ -53,15 +53,21 @@
         </tbody>
     </table>
     <div class="{{ 'quote-totals' if doc_type == 'Quote' else 'invoice-totals' }}">
-        <div class="totals-row">
-            <span>Subtotal</span>
-            <span>R{{ "%.2f"|format(document.subtotal) }}</span>
-        </div>
-        <div class="totals-row grand-total">
-            <span>TOTAL</span>
-            <span>R{{ "%.2f"|format(document.total) }}</span>
-        </div>
+    <div class="totals-row">
+        <span>Subtotal</span>
+        <span>R{{ "%.2f"|format(document.subtotal) }}</span>
     </div>
+    {% if document.discount and document.discount > 0 %}
+    <div class="totals-row">
+        <span>Discount</span>
+        <span>- R{{ "%.2f"|format(document.discount) }}</span>
+    </div>
+    {% endif %}
+    <div class="totals-row grand-total">
+        <span>TOTAL</span>
+        <span>R{{ "%.2f"|format(document.total) }}</span>
+    </div>
+</div>
     {% if doc_type == 'Quote' %}
     <div class="terms-section-view">
         </div>
