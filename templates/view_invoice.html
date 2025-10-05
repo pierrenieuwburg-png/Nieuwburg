@@ -2,5 +2,11 @@
 {% block title %}View Invoice {{ invoice.invoice_number }}{% endblock %}
 
 {% block content %}
-    {% include '_view.html' with doc_type='Invoice', document=invoice, back_url=url_for('admin_invoices') %}
+   {# Set the variables that the _view.html template needs #}
+   {% set doc_type = 'Invoice' %}
+   {% set document = invoice %}
+   {% set back_url = url_for('admin_invoices') %}
+   
+   {# Now include the template #}
+   {% include '_view.html' %}
 {% endblock %}

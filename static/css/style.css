@@ -1450,3 +1450,99 @@ footer {
   background-color: #e0e0e0;
   border-radius: 4px;
 }
+.logo-view {
+  width: 150px;
+  height: auto;
+}
+/* --- NEW Quote & Invoice View Styles --- */
+.quote-view, .invoice-view {
+  background-color: #ffffff;
+  padding: 40px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  max-width: 850px;
+  margin: 0 auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+
+.quote-header, .invoice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 2px solid #e0e0e0;
+  padding-bottom: 20px;
+  margin-bottom: 30px;
+}
+
+.quote-title h1, .invoice-title h1 {
+  margin-top: 0;
+  color: #333;
+  font-size: 2.5rem;
+  margin-bottom: 10px;
+}
+.quote-title p, .invoice-title p {
+  margin: 4px 0;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.quote-details, .invoice-details {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 30px;
+  line-height: 1.6;
+}
+.quote-details h3, .invoice-details h3 {
+  margin-top: 0;
+  font-size: 0.9rem;
+  color: #888;
+  text-transform: uppercase;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 5px;
+  margin-bottom: 10px;
+}
+.quote-details p, .invoice-details p {
+  margin: 2px 0;
+}
+
+.line-items-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+.line-items-table th, .line-items-table td {
+  padding: 12px 15px;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+.line-items-table th {
+  background-color: #f8f9fa;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  color: #555;
+}
+.line-items-table tbody tr:nth-child(odd) {
+  background-color: #fdfdfd; /* Adds subtle striping for readability */
+}
+
+.quote-totals, .invoice-totals {
+  margin-top: 20px;
+  width: 40%;
+  margin-left: auto;
+}
+.totals-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+}
+.totals-row span:first-child {
+  color: #555;
+}
+.totals-row.grand-total {
+  font-weight: bold;
+  font-size: 1.2rem;
+  background-color: #f8f9fa;
+  border-top: 2px solid #333;
+  border-bottom: none;
+}

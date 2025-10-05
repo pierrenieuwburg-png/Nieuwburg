@@ -93,6 +93,8 @@
     </style>
 </head>
 <body>
-    {% include '_view.html' with doc_type='Invoice', document=invoice %}
+    {% set doc_type = 'Invoice' %}
+    {% set document = invoice %}
+    {% include '_pdf_view.html' %}
 </body>
 </html>

@@ -5,7 +5,7 @@
 
 <div class="{{ 'quote-view' if doc_type == 'Quote' else 'invoice-view' }}">
     <div class="{{ 'quote-header' if doc_type == 'Quote' else 'invoice-header' }}">
-        <img src="{{ url_for('static', filename='img/LogoBlackWithTitle.png') }}" alt="Nieuwburg Blitz Logo">
+        <img src="{{ url_for('static', filename='img/LogoBlackWithTitle.png') }}" alt="Nieuwburg Blitz Logo" class="logo-view">
         <div class="{{ 'quote-title' if doc_type == 'Quote' else 'invoice-title' }}" style="text-align: right;">
             <h1>{{ doc_type.upper() }}</h1>
             <p><strong>{{ doc_type }} Number:</strong> {{ document.quote_number or document.invoice_number }}</p>
@@ -20,9 +20,14 @@
     <div class="{{ 'quote-details' if doc_type == 'Quote' else 'invoice-details' }}">
         <div>
             <h3>Billed To:</h3>
-            <p><strong>{{ document.user.profile.full_name or document.user.email }}</strong></p>
-            <p>{{ document.user.profile.address or 'No address on file' }}</p>
-            <p>{{ document.user.email }}</p>
+            {% if document.user and document.user.profile %}
+                <p><strong>{{ document.user.profile.full_name or document.user.email }}</strong></p>
+                <p>{{ document.user.profile.address or 'No address on file' }}</p>
+                <p>{{ document.user.email }}</p>
+                {% elif document.guest_name %}
+                <p><strong>{{ document.guest_name }}</strong> (Guest)</p>
+                <p>{{ document.guest_address or 'No address provided' }}</p>
+            {% endif %}
         </div>
         <div style="text-align: right;">
             <h3>From:</h3>

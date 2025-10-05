@@ -32,7 +32,13 @@
     {% for quote in quotes %}
     <tr>
         <td>{{ quote.quote_number }}</td>
-        <td>{{ quote.user.profile.full_name or quote.user.email }}</td>
+        <td>
+            {% if quote.user %}
+            {{ quote.user.profile.full_name or quote.user.email }}
+            {% else %}
+            {{ quote.guest_name }} (Guest)
+            {% endif %}
+        </td>
         <td>{{ quote.quote_date.strftime('%d %b %Y') }}</td>
         <td>R{{ "%.2f"|format(quote.total) }}</td>
         <td class="action-buttons">

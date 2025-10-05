@@ -93,6 +93,8 @@
     </style>
 </head>
 <body>
-    {% include '_view.html' with doc_type='Quote', document=quote %}
+    {% set doc_type = 'Quote' %}
+    {% set document = quote %}
+    {% include '_pdf_view.html' %}
 </body>
 </html>

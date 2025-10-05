@@ -8,9 +8,17 @@
         {{ form.hidden_tag() }}
         <div style="display: flex; gap: 20px;">
             <div class="form-group" style="flex: 2;">
-                {{ form.client.label }}
-                {{ form.client(class="form-control") }}
-            </div>
+                {{ form.client_or_guest_name.label(text='Client') }}
+                {{ form.client_or_guest_name(class="form-control", list="client-list", placeholder="Type new name or select existing client...") }}
+            <datalist id="client-list">
+                {% for client in client_list %}
+                <option value="{{ client.profile.full_name or client.email }}">
+                {% endfor %}
+            </datalist>
+            {% for error in form.client_or_guest_name.errors %}
+            <span style="color: red;">[{{ error }}]</span>
+            {% endfor %}
+        </div>
             <div class="form-group" style="flex: 1;">
                 {% if doc_type == 'Quote' %}
                     {{ form.quote_date.label }}
@@ -35,26 +43,35 @@
 
         <h3>Line Items</h3>
         <div id="line-items-container">
-            {% for item in form.line_items %}
-            <div class="line-item">
-                <div class="form-group">
-                    {{ item.form.description.label }}
-                    {{ item.form.description(rows=2, class="form-control") }}
-                </div>
-                <div style="display: flex; gap: 20px;">
-                    <div class="form-group" style="flex: 1;">
-                        {{ item.form.quantity.label }}
-                        {{ item.form.quantity(class="form-control") }}
-                    </div>
-                    <div class="form-group" style="flex: 1;">
-                        {{ item.form.unit_price.label }}
-                        {{ item.form.unit_price(class="form-control") }}
-                    </div>
-                </div>
-                <hr>
-            </div>
+    {% for item in form.line_items %}
+    <div class="line-item">
+        <div class="form-group">
+            {{ item.form.description.label }}
+            {{ item.form.description(rows=2, class="form-control") }}
+            {% for error in item.form.description.errors %}
+                <span style="color: red;">[{{ error }}]</span>
             {% endfor %}
         </div>
+        <div style="display: flex; gap: 20px;">
+            <div class="form-group" style="flex: 1;">
+                {{ item.form.quantity.label }}
+                {{ item.form.quantity(class="form-control") }}
+                {% for error in item.form.quantity.errors %}
+                    <span style="color: red;">[{{ error }}]</span>
+                {% endfor %}
+            </div>
+            <div class="form-group" style="flex: 1;">
+                {{ item.form.unit_price.label }}
+                {{ item.form.unit_price(class="form-control") }}
+                {% for error in item.form.unit_price.errors %}
+                    <span style="color: red;">[{{ error }}]</span>
+                {% endfor %}
+            </div>
+        </div>
+        <hr>
+    </div>
+    {% endfor %}
+</div>
         <button type="button" id="add-item-btn" class="cta-outline">Add Line Item</button>
 
         <div style="text-align: right; margin-top: 30px;">

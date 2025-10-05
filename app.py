@@ -86,13 +86,16 @@ job_staff_association = db.Table('job_staff_association',
     db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True)
 )
 
-# --- DATABASE MODELS ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(100), unique=True, nullable=True)
     password_hash = db.Column(db.String(128))
     role = db.Column(db.String(20), nullable=False, default='client')
+    # ADDED FOR NEW FEATURES
     password_reset_required = db.Column(db.Boolean, default=False)
+    is_confirmed = db.Column(db.Boolean, nullable=False, default=False)
+    confirmed_on = db.Column(db.DateTime, nullable=True)
+    # ---
     profile = db.relationship('Profile', backref='user', uselist=False, cascade="all, delete-orphan")
     quote_requests = db.relationship('QuoteRequest', backref='user', lazy=True, cascade="all, delete-orphan")
     quotes = db.relationship('Quote', backref='user', lazy=True, cascade="all, delete-orphan")
@@ -135,8 +138,17 @@ class Quote(db.Model):
     expiry_date = db.Column(db.Date)
     subtotal = db.Column(db.Float, default=0.0)
     total = db.Column(db.Float, default=0.0)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    # MODIFIED FOR GUEST QUOTES
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default='Draft')
+    acceptance_token = db.Column(db.String(100), unique=True, nullable=True)
+    guest_name = db.Column(db.String(100))
+    guest_email = db.Column(db.String(100))
+    guest_phone = db.Column(db.String(20))
+    guest_address = db.Column(db.Text)
+    # ---
     line_items = db.relationship('QuoteLineItem', backref='quote', lazy=True, cascade="all, delete-orphan")
+
 
 class QuoteLineItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -171,12 +183,8 @@ class Job(db.Model):
     end_time = db.Column(db.Time, nullable=True)
     status = db.Column(db.String(50), nullable=False, default='Scheduled')
     notes = db.Column(db.Text, nullable=True)
-
-    # Foreign key to link back to the original quote request
     quote_request_id = db.Column(db.Integer, db.ForeignKey('quote_request.id'), nullable=True)
     quote_request = db.relationship('QuoteRequest', backref=db.backref('job', uselist=False))
-
-    # Many-to-many relationship with Staff (User model)
     assigned_staff = db.relationship('User', secondary=job_staff_association, lazy='subquery',
         backref=db.backref('jobs_assigned', lazy=True))
 
@@ -191,7 +199,8 @@ class StaffApplication(db.Model):
 
     def __repr__(self):
         return f'<StaffApplication {self.full_name}>'
-    
+
+# --- NEW MODELS FOR BOOKING & PAYMENTS ---
 class ServiceCategory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True)
@@ -207,7 +216,6 @@ class ServiceItem(db.Model):
     name = db.Column(db.String(100), nullable=False)
     estimated_time_mins = db.Column(db.Integer, default=0)
     category_id = db.Column(db.Integer, db.ForeignKey('service_category.id'), nullable=False)
-    # The new relationship to the prices
     prices = db.relationship('ServicePrice', backref='service_item', lazy=True, cascade="all, delete-orphan")
 
     def __repr__(self):
@@ -215,7 +223,7 @@ class ServiceItem(db.Model):
     
 class ServicePrice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    frequency = db.Column(db.String(50), nullable=False) # e.g., 'Once-Off', 'Weekly', 'Monthly'
+    frequency = db.Column(db.String(50), nullable=False)
     price = db.Column(db.Float, nullable=False, default=0.0)
     service_item_id = db.Column(db.Integer, db.ForeignKey('service_item.id'), nullable=False)
 
@@ -234,14 +242,7 @@ class Booking(db.Model):
     estimated_time_mins = db.Column(db.Integer)
     status = db.Column(db.String(50), default='Pending Payment')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    # This will store the selected services as a JSON string
     service_details = db.Column(db.Text)
-
-@login_manager.user_loader
-def load_user(user_id):
-    return db.session.get(User, int(user_id))
-
-# app.py (add with other models)
 
 class Post(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -254,6 +255,21 @@ class Post(db.Model):
 
     def __repr__(self):
         return f'<Post {self.title}>'
+    
+class ActivityLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    activity_type = db.Column(db.String(50), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    user = db.relationship('User', backref=db.backref('activities', lazy=True))
+
+    def __repr__(self):
+        return f'<ActivityLog {self.activity_type}>'
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
 
 # --- ADMIN CLIENT MANAGEMENT ---
 @app.route('/admin/clients')
@@ -572,25 +588,25 @@ class PostForm(FlaskForm):
     excerpt = TextAreaField('Excerpt (Short Summary)', validators=[Optional(), Length(max=300)])
     submit = SubmitField('Save Post')
 
-class QuoteLineItemForm(Form):
+class QuoteLineItemForm(FlaskForm):
     description = TextAreaField('Description', validators=[DataRequired()])
     quantity = FloatField('Quantity', validators=[DataRequired()], default=1)
     unit_price = FloatField('Unit Price', validators=[DataRequired()])
 
-class QuoteForm(FlaskForm):
-    client = SelectField('Client', coerce=int, validators=[DataRequired()])
+class GuestQuoteForm(FlaskForm):
+    client_or_guest_name = StringField('Client Name', validators=[DataRequired()])
     quote_date = DateField('Quote Date', default=date.today, validators=[DataRequired()])
     expiry_date = DateField('Expiry Date', validators=[Optional()])
     line_items = FieldList(FormField(QuoteLineItemForm), min_entries=1)
-    submit = SubmitField('Create Quote')
+    submit = SubmitField('Save Quote')
 
-class InvoiceLineItemForm(Form):
+class InvoiceLineItemForm(FlaskForm):
     description = TextAreaField('Description', validators=[DataRequired()])
     quantity = FloatField('Quantity', validators=[DataRequired()], default=1)
     unit_price = FloatField('Unit Price', validators=[DataRequired()])
 
 class InvoiceForm(FlaskForm):
-    client = SelectField('Client', coerce=int, validators=[DataRequired()])
+    client_or_guest_name = StringField('Client Name', validators=[DataRequired()])
     invoice_date = DateField('Invoice Date', default=date.today, validators=[DataRequired()])
     due_date = DateField('Due Date', validators=[Optional()])
     line_items = FieldList(FormField(InvoiceLineItemForm), min_entries=1)
@@ -1070,37 +1086,45 @@ def admin_quotes():
 @login_required
 def admin_create_quote():
     if current_user.role != 'admin': return redirect(url_for('index'))
-    form = QuoteForm()
-    form.client.choices = [(u.id, u.profile.full_name or u.email) for u in User.query.filter_by(role='client').all()]
+    
+    form = GuestQuoteForm()
+    client_list = User.query.filter_by(role='client').all()
 
     if form.validate_on_submit():
+        client_name_input = form.client_or_guest_name.data
+        user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
+
         new_quote_number = get_next_quote_number()
         quote = Quote(
             quote_number=new_quote_number,
-            user_id=form.client.data,
             quote_date=form.quote_date.data,
-            expiry_date=form.expiry_date.data
+            expiry_date=form.expiry_date.data,
+            status='Draft'
         )
+
+        if user:
+            quote.user_id = user.id
+        else:
+            quote.guest_name = client_name_input
+
         db.session.add(quote)
-        
+        db.session.flush()
+
         subtotal = 0
-        for item_form in form.line_items.data:
-            amount = item_form['quantity'] * item_form['unit_price']
-            line_item = QuoteLineItem(
-                quote=quote,
-                description=item_form['description'],
-                quantity=item_form['quantity'],
-                unit_price=item_form['unit_price'],
-                amount=amount
-            )
-            subtotal += amount
-            db.session.add(line_item)
-            
+        for item_data in form.line_items.data:
+            # THIS IS THE FIX: Remove the CSRF token before creating the object
+            item_data.pop('csrf_token', None)
+            if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
+                amount = item_data['quantity'] * item_data['unit_price']
+                line_item = QuoteLineItem(quote_id=quote.id, **item_data, amount=amount)
+                db.session.add(line_item)
+                subtotal += amount
+        
         quote.subtotal = subtotal
         quote.total = subtotal
         
         db.session.commit()
-        flash(f'Quote {new_quote_number} created successfully.', 'success')
+        flash(f'Draft quote {new_quote_number} created successfully.', 'success')
         return redirect(url_for('admin_quotes'))
 
     context = {
@@ -1108,7 +1132,9 @@ def admin_create_quote():
         'title': 'Create New Quote',
         'back_url': url_for('admin_quotes'),
         'doc_type': 'Quote',
-        'submit_text': 'Create Quote'
+        'submit_text': 'Save as Draft',
+        'client_list': client_list,
+        'document': None
     }
     return render_template('create_quote.html', **context)
 
@@ -1131,29 +1157,33 @@ def admin_edit_quote(quote_id):
         flash('Quote not found.', 'error')
         return redirect(url_for('admin_quotes'))
 
-    form = QuoteForm(obj=quote)
-    form.client.choices = [(u.id, u.profile.full_name or u.email) for u in User.query.filter_by(role='client').all()]
+    form = GuestQuoteForm(obj=quote)
+    client_list = User.query.filter_by(role='client').all()
 
     if form.validate_on_submit():
-        quote.user_id = form.client.data
+        client_name_input = form.client_or_guest_name.data
+        user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
+
         quote.quote_date = form.quote_date.data
         quote.expiry_date = form.expiry_date.data
 
-        for item in quote.line_items:
-            db.session.delete(item)
+        if user:
+            quote.user_id = user.id
+            quote.guest_name = None
+        else:
+            quote.user_id = None
+            quote.guest_name = client_name_input
 
+        QuoteLineItem.query.filter_by(quote_id=quote.id).delete()
         subtotal = 0
         for item_data in form.line_items.data:
-            amount = item_data['quantity'] * item_data['unit_price']
-            line_item = QuoteLineItem(
-                quote=quote,
-                description=item_data['description'],
-                quantity=item_data['quantity'],
-                unit_price=item_data['unit_price'],
-                amount=amount
-            )
-            subtotal += amount
-            db.session.add(line_item)
+            # THIS IS THE FIX: Remove the CSRF token before creating the object
+            item_data.pop('csrf_token', None)
+            if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
+                amount = item_data['quantity'] * item_data['unit_price']
+                line_item = QuoteLineItem(quote_id=quote.id, **item_data, amount=amount)
+                db.session.add(line_item)
+                subtotal += amount
         
         quote.subtotal = subtotal
         quote.total = subtotal
@@ -1162,15 +1192,20 @@ def admin_edit_quote(quote_id):
         flash(f'Quote {quote.quote_number} updated successfully.', 'success')
         return redirect(url_for('admin_quotes'))
 
-    elif request.method == 'GET':
-        form.client.data = quote.user_id
-
+    if request.method == 'GET':
+        if quote.user:
+            form.client_or_guest_name.data = quote.user.profile.full_name
+        else:
+            form.client_or_guest_name.data = quote.guest_name
+            
     context = {
         'form': form,
         'title': f'Edit Quote: {quote.quote_number}',
         'back_url': url_for('admin_quotes'),
         'doc_type': 'Quote',
-        'submit_text': 'Save Changes'
+        'submit_text': 'Save Changes',
+        'client_list': client_list,
+        'document': quote
     }
     return render_template('edit_quote.html', **context)
 
@@ -1198,7 +1233,9 @@ def admin_download_quote_pdf(quote_id):
         flash('Quote not found.', 'error')
         return redirect(url_for('admin_quotes'))
 
-    rendered_template = render_template('quote_pdf_template.html', quote=quote)
+    # This line provides the logo path to the template
+    logo_path = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
+    rendered_template = render_template('quote_pdf_template.html', quote=quote, logo_path=logo_path)
     
     pdf_result = BytesIO()
     pisa_status = pisa.CreatePDF(
@@ -1235,45 +1272,51 @@ def admin_invoices():
 @login_required
 def admin_create_invoice():
     if current_user.role != 'admin': return redirect(url_for('index'))
+    
     form = InvoiceForm()
-    form.client.choices = [(u.id, u.profile.full_name or u.email) for u in User.query.filter_by(role='client').all()]
+    client_list = User.query.filter_by(role='client').all()
 
     if form.validate_on_submit():
-        new_invoice_number = get_next_invoice_number()
-        invoice = Invoice(
-            invoice_number=new_invoice_number,
-            user_id=form.client.data,
-            invoice_date=form.invoice_date.data,
-            due_date=form.due_date.data
-        )
-        db.session.add(invoice)
-        
-        subtotal = 0
-        for item_form in form.line_items.data:
-            amount = item_form['quantity'] * item_form['unit_price']
-            line_item = InvoiceLineItem(
-                invoice=invoice,
-                description=item_form['description'],
-                quantity=item_form['quantity'],
-                unit_price=item_form['unit_price'],
-                amount=amount
+        client_name_input = form.client_or_guest_name.data
+        user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
+
+        if not user:
+            form.client_or_guest_name.errors.append(f"Client '{client_name_input}' not found. An invoice must be for an existing client.")
+        else:
+            new_invoice_number = get_next_invoice_number()
+            invoice = Invoice(
+                invoice_number=new_invoice_number,
+                user_id=user.id,
+                invoice_date=form.invoice_date.data,
+                due_date=form.due_date.data
             )
-            subtotal += amount
-            db.session.add(line_item)
+            db.session.add(invoice)
+            db.session.flush()
+
+            subtotal = 0
+            for item_data in form.line_items.data:
+                # THIS IS THE FIX: Remove the CSRF token before creating the object
+                item_data.pop('csrf_token', None)
+                if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
+                    amount = item_data['quantity'] * item_data['unit_price']
+                    db.session.add(InvoiceLineItem(invoice_id=invoice.id, **item_data, amount=amount))
+                    subtotal += amount
             
-        invoice.subtotal = subtotal
-        invoice.total = subtotal
-        
-        db.session.commit()
-        flash(f'Invoice {new_invoice_number} created successfully.', 'success')
-        return redirect(url_for('admin_invoices'))
+            invoice.subtotal = subtotal
+            invoice.total = subtotal
+
+            db.session.commit()
+            flash(f'Invoice {new_invoice_number} created successfully.', 'success')
+            return redirect(url_for('admin_invoices'))
 
     context = {
         'form': form,
         'title': 'Create New Invoice',
         'back_url': url_for('admin_invoices'),
         'doc_type': 'Invoice',
-        'submit_text': 'Create Invoice'
+        'submit_text': 'Create Invoice',
+        'client_list': client_list,
+        'document': None
     }
     return render_template('create_invoice.html', **context)
 
@@ -1297,45 +1340,47 @@ def admin_edit_invoice(invoice_id):
         return redirect(url_for('admin_invoices'))
 
     form = InvoiceForm(obj=invoice)
-    form.client.choices = [(u.id, u.profile.full_name or u.email) for u in User.query.filter_by(role='client').all()]
+    client_list = User.query.filter_by(role='client').all()
 
     if form.validate_on_submit():
-        invoice.user_id = form.client.data
-        invoice.invoice_date = form.invoice_date.data
-        invoice.due_date = form.due_date.data
+        client_name_input = form.client_or_guest_name.data
+        user = User.query.join(Profile).filter(Profile.full_name == client_name_input).first()
 
-        for item in invoice.line_items:
-            db.session.delete(item)
+        if not user:
+            form.client_or_guest_name.errors.append(f"Client '{client_name_input}' not found.")
+        else:
+            invoice.user_id = user.id
+            invoice.invoice_date = form.invoice_date.data
+            invoice.due_date = form.due_date.data
 
-        subtotal = 0
-        for item_data in form.line_items.data:
-            amount = item_data['quantity'] * item_data['unit_price']
-            line_item = InvoiceLineItem(
-                invoice=invoice,
-                description=item_data['description'],
-                quantity=item_data['quantity'],
-                unit_price=item_data['unit_price'],
-                amount=amount
-            )
-            subtotal += amount
-            db.session.add(line_item)
-        
-        invoice.subtotal = subtotal
-        invoice.total = subtotal
+            InvoiceLineItem.query.filter_by(invoice_id=invoice.id).delete()
+            subtotal = 0
+            for item_data in form.line_items.data:
+                # THIS IS THE FIX: Remove the CSRF token before creating the object
+                item_data.pop('csrf_token', None)
+                if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
+                    amount = item_data['quantity'] * item_data['unit_price']
+                    db.session.add(InvoiceLineItem(invoice_id=invoice.id, **item_data, amount=amount))
+                    subtotal += amount
+            
+            invoice.subtotal = subtotal
+            invoice.total = subtotal
 
-        db.session.commit()
-        flash(f'Invoice {invoice.invoice_number} updated successfully.', 'success')
-        return redirect(url_for('admin_invoices'))
+            db.session.commit()
+            flash(f'Invoice {invoice.invoice_number} updated successfully.', 'success')
+            return redirect(url_for('admin_invoices'))
 
-    elif request.method == 'GET':
-        form.client.data = invoice.user_id
+    if request.method == 'GET':
+        form.client_or_guest_name.data = invoice.user.profile.full_name
 
     context = {
         'form': form,
         'title': f'Edit Invoice: {invoice.invoice_number}',
         'back_url': url_for('admin_invoices'),
         'doc_type': 'Invoice',
-        'submit_text': 'Save Changes'
+        'submit_text': 'Save Changes',
+        'client_list': client_list,
+        'document': invoice
     }
     return render_template('edit_invoice.html', **context)
 
@@ -1361,7 +1406,10 @@ def admin_download_invoice_pdf(invoice_id):
         flash('Invoice not found.', 'error')
         return redirect(url_for('admin_invoices'))
 
-    rendered_template = render_template('invoice_pdf_template.html', invoice=invoice)
+    # This line provides the logo path to the template
+    logo_path = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
+    rendered_template = render_template('invoice_pdf_template.html', invoice=invoice, logo_path=logo_path)
+    
     pdf_result = BytesIO()
     pisa.CreatePDF(BytesIO(rendered_template.encode('UTF-8')), dest=pdf_result)
     pdf_result.seek(0)
