@@ -388,69 +388,58 @@ setupModal('join-team-modal', ['join-team-btn'], 'close-join-team-modal-button',
   const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
 
   if (deleteBtn && deleteModal && confirmDeleteBtn) {
-    // This listener is for the initial "Delete Profile" button on the dashboard.
-    // Its only job is to open the confirmation modal.
     deleteBtn.addEventListener('click', (e) => {
-      e.preventDefault(); // Prevent any default button behavior
+      e.preventDefault();
       deleteModal.classList.add('visible');
     });
 
-    // This listener is for the final "Yes, Delete My Account" button inside the modal.
-    // This is the only place where the account deletion is triggered.
-    // This listener is for the final "Yes, Delete My Account" button inside the modal.
-// This is the only place where the account deletion is triggered.
-confirmDeleteBtn.addEventListener('click', async () => {
-  try {
-    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-    
-    const response = await fetch('/delete_account', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': csrfToken
+    confirmDeleteBtn.addEventListener('click', async () => {
+      try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        
+        const response = await fetch('/delete_account', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+          }
+        });
+        
+        const result = await response.json();
+
+        if (result.status === 'ok') {
+          const completionModal = document.getElementById('deletion-complete-modal');
+          if (completionModal) {
+            closeDeleteModal();
+            completionModal.classList.add('visible');
+            
+            const closeCompletionModal = () => {
+              completionModal.classList.remove('visible');
+              setTimeout(() => { window.location.href = '/'; }, 400);
+            };
+
+            const redirectTimeout = setTimeout(closeCompletionModal, 5000);
+
+            const handleOutsideClick = (e) => {
+              if (e.target === completionModal) {
+                clearTimeout(redirectTimeout);
+                closeCompletionModal();
+                completionModal.removeEventListener('click', handleOutsideClick);
+              }
+            };
+
+            completionModal.addEventListener('click', handleOutsideClick);
+          }
+        } else {
+          alert('Deletion failed: ' + (result.message || 'Unknown error.'));
+          closeDeleteModal();
+        }
+      } catch (error) {
+        console.error('Deletion error:', error);
+        alert('An error occurred. Could not delete account.');
       }
     });
-    
-    const result = await response.json();
 
-    if (result.status === 'ok') {
-      const completionModal = document.getElementById('deletion-complete-modal');
-      if (completionModal) {
-        closeDeleteModal(); // Close the confirmation modal first
-        completionModal.classList.add('visible'); // Show the final success message
-        
-        const closeCompletionModal = () => {
-          completionModal.classList.remove('visible');
-          setTimeout(() => { window.location.href = '/'; }, 400);
-        };
-
-        const redirectTimeout = setTimeout(closeCompletionModal, 5000);
-
-        // This is the updated "click outside" listener
-        const handleOutsideClick = (e) => {
-          console.log("Overlay clicked. Target is:", e.target); // Debugging line
-          if (e.target === completionModal) {
-            clearTimeout(redirectTimeout);
-            closeCompletionModal();
-            // IMPORTANT: Remove the listener after it's used
-            completionModal.removeEventListener('click', handleOutsideClick);
-          }
-        };
-
-        completionModal.addEventListener('click', handleOutsideClick);
-        console.log("Click-outside listener attached to deletion-complete-modal."); // Debugging line
-      }
-    } else {
-      alert('Deletion failed: ' + (result.message || 'Unknown error.'));
-      closeDeleteModal();
-    }
-  } catch (error) {
-    console.error('Deletion error:', error);
-    alert('An error occurred. Could not delete account.');
-  }
-});
-
-    // --- Listeners to close the confirmation modal without deleting ---
     const closeDeleteModal = () => {
       deleteModal.classList.remove('visible');
     };

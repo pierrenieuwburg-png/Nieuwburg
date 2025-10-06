@@ -91,11 +91,11 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(100), unique=True, nullable=True)
     password_hash = db.Column(db.String(128))
     role = db.Column(db.String(20), nullable=False, default='client')
-    # ADDED FOR NEW FEATURES
+    
     password_reset_required = db.Column(db.Boolean, default=False)
     is_confirmed = db.Column(db.Boolean, nullable=False, default=False)
     confirmed_on = db.Column(db.DateTime, nullable=True)
-    # ---
+
     profile = db.relationship('Profile', backref='user', uselist=False, cascade="all, delete-orphan")
     quote_requests = db.relationship('QuoteRequest', backref='user', lazy=True, cascade="all, delete-orphan")
     quotes = db.relationship('Quote', backref='user', lazy=True, cascade="all, delete-orphan")
@@ -274,6 +274,15 @@ class Settings(db.Model):
     key = db.Column(db.String(50), unique=True, nullable=False)
     value = db.Column(db.Text, nullable=False)
 
+def log_activity(activity_type, description, user_id=None):
+    """Helper function to create a new activity log entry."""
+    log = ActivityLog(
+        activity_type=activity_type,
+        description=description,
+        user_id=user_id
+    )
+    db.session.add(log)
+
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
@@ -413,7 +422,6 @@ def admin_add_staff():
         )
         new_staff.set_password(temp_password)
         
-        # ... (rest of the profile creation logic remains the same) ...
         id_number = form.id_number.data
         dob = None
         if id_number:
@@ -437,12 +445,9 @@ def admin_add_staff():
         db.session.add(new_profile)
         db.session.commit()
         
-        # --- ENHANCED DEBUGGING & EMAIL LOGIC ---
-        print("\n--- ATTEMPTING TO SEND EMAIL ---")
-        print(f"Sender (from config): '{app.config['MAIL_USERNAME']}'")
-        print(f"Password (from config): '{app.config['MAIL_PASSWORD']}'")
-        print("---------------------------------\n")
-
+        # Activity Logging
+        log_activity('Staff Created', f"Admin '{current_user.email}' created new staff member: {new_staff.email}", user_id=current_user.id)
+        
         try:
             msg = Message(
                 subject="[Nieuwburg Blitz] New Staff Member Registered",
@@ -460,7 +465,6 @@ def admin_add_staff():
             flash("Admin notification email sent successfully.", "info")
         except Exception as e:
             flash(f"Staff member created, but failed to send notification email. Error: {e}", "error")
-        # --- END OF EMAIL LOGIC ---
 
         flash(f"Staff member '{form.full_name.data}' created. Temporary password: {temp_password}", 'success')
         return redirect(url_for('admin_staff'))
@@ -481,7 +485,6 @@ def admin_edit_staff(user_id):
     form = EditStaffForm(obj=staff_member.profile)
 
     if form.validate_on_submit():
-        # Check if a new file has been uploaded before trying to save it
         if form.profile_image.data and isinstance(form.profile_image.data, FileStorage):
             file = form.profile_image.data
             if file.filename != '':
@@ -490,15 +493,12 @@ def admin_edit_staff(user_id):
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], unique_filename))
                 staff_member.profile.profile_image = unique_filename
 
-        # Update all other profile fields from the form
         staff_member.profile.full_name = form.full_name.data
         staff_member.profile.phone_number = form.phone_number.data
         staff_member.profile.address = form.address.data
         id_number = form.id_number.data
         staff_member.profile.id_number = id_number
-
         staff_member.profile.notes = request.form.get('notes')
-
         staff_member.profile.service_frequency = request.form.get('service_frequency')
         service_fee_str = request.form.get('service_fee')
         if service_fee_str and service_fee_str.strip():
@@ -520,6 +520,10 @@ def admin_edit_staff(user_id):
             staff_member.profile.date_of_birth = None
 
         db.session.commit()
+        
+        # Activity Logging
+        log_activity('Staff Updated', f"Admin '{current_user.email}' updated profile for staff member: {staff_member.email}", user_id=current_user.id)
+        
         flash('Staff profile updated successfully.', 'success')
         return redirect(url_for('admin_view_staff', user_id=user_id))
 
@@ -531,8 +535,13 @@ def admin_delete_staff(user_id):
     if current_user.role != 'admin': return redirect(url_for('index'))
     staff_to_delete = User.query.get_or_404(user_id)
     if staff_to_delete.role == 'staff':
+        staff_email = staff_to_delete.email
         db.session.delete(staff_to_delete)
         db.session.commit()
+        
+        # Activity Logging
+        log_activity('Staff Deleted', f"Admin '{current_user.email}' deleted staff member: {staff_email}", user_id=current_user.id)
+        
         flash('Staff member has been deleted.', 'success')
     else:
         flash('This user is not a staff member.', 'error')
@@ -752,7 +761,7 @@ def register():
         db.session.add(new_profile)
 
         db.session.commit()
-
+        log_activity('New Client Registration', f"New client registered: {new_user.email}", user_id=new_user.id)
         login_user(new_user)
 
         flash('Welcome! Please complete your profile.', 'success')
@@ -866,8 +875,10 @@ def delete_account():
     user_to_delete = db.session.get(User, current_user.id) 
     
     if user_to_delete:
+        user_email = user_to_delete.email
         db.session.delete(user_to_delete)
         db.session.commit()
+        log_activity('Account Deleted', f"User '{user_email}' deleted their own account.", user_id=None)
     
     logout_user()
     return jsonify({'status': 'ok', 'message': 'Account deleted successfully.'})
@@ -887,6 +898,16 @@ def admin_dashboard():
         flash('You do not have permission to access this page.', 'error')
         return redirect(url_for('index'))
     return render_template('admin_dashboard.html')
+
+@app.route('/admin/activity-log')
+@login_required
+def admin_activity_log():
+    if current_user.role != 'admin':
+        flash('You do not have permission to access this page.', 'error')
+        return redirect(url_for('index'))
+    
+    logs = ActivityLog.query.order_by(ActivityLog.timestamp.desc()).all()
+    return render_template('admin_activity_log.html', logs=logs)
 
 @app.route('/admin/bookings')
 @login_required
@@ -1065,6 +1086,7 @@ def admin_add_post():
         )
         db.session.add(new_post)
         db.session.commit()
+        log_activity('Blog Post Created', f"Admin '{current_user.email}' created a new blog post: '{new_post.title}'", user_id=current_user.id)
         flash('Blog post has been created.', 'success')
         return redirect(url_for('admin_blog'))
     return render_template('admin_edit_post.html', form=form, title="Create New Post")
@@ -1084,6 +1106,7 @@ def admin_edit_post(post_id):
         post.content = form.content.data
         post.excerpt = form.excerpt.data
         db.session.commit()
+        log_activity('Blog Post Updated', f"Admin '{current_user.email}' updated the blog post: '{post.title}'", user_id=current_user.id)
         flash('Blog post has been updated.', 'success')
         return redirect(url_for('admin_blog'))
         
@@ -1097,6 +1120,7 @@ def admin_delete_post(post_id):
     if post:
         db.session.delete(post)
         db.session.commit()
+        log_activity('Blog Post Deleted', f"Admin '{current_user.email}' deleted the blog post: '{post_title}'", user_id=current_user.id)
         flash('Post has been deleted.', 'success')
     return redirect(url_for('admin_blog'))
 
@@ -1153,6 +1177,7 @@ def admin_create_quote():
             quote.total = subtotal
             
             db.session.commit()
+            log_activity('Quote Created', f"Admin '{current_user.email}' created quote {quote.quote_number}.", user_id=current_user.id)
             flash(f'Draft quote {quote.quote_number} created successfully.', 'success')
             return redirect(url_for('admin_quotes'))
 
@@ -1223,6 +1248,7 @@ def admin_edit_quote(quote_id):
             quote.total = subtotal
 
             db.session.commit()
+            log_activity('Quote Updated', f"Admin '{current_user.email}' updated quote {quote.quote_number}.", user_id=current_user.id)
             flash(f'Quote {quote.quote_number} updated successfully.', 'success')
             return redirect(url_for('admin_quotes'))
 
@@ -1252,6 +1278,7 @@ def admin_delete_quote(quote_id):
     if quote_to_delete:
         db.session.delete(quote_to_delete)
         db.session.commit()
+        log_activity('Quote Deleted', f"Admin '{current_user.email}' deleted quote {quote_number}.", user_id=current_user.id)
         flash(f'Quote {quote_to_delete.quote_number} has been deleted.', 'success')
     else:
         flash('Quote not found.', 'error')
@@ -1368,6 +1395,7 @@ def admin_create_invoice():
                 invoice.total = subtotal - discount_amount
 
                 db.session.commit()
+                log_activity('Invoice Created', f"Admin '{current_user.email}' created invoice {invoice.invoice_number}.", user_id=current_user.id)
                 flash(f'Invoice {invoice.invoice_number} created successfully.', 'success')
                 return redirect(url_for('admin_invoices'))
     
@@ -1454,6 +1482,7 @@ def admin_edit_invoice(invoice_id):
                 invoice.total = subtotal - discount_amount
 
                 db.session.commit()
+                log_activity('Invoice Updated', f"Admin '{current_user.email}' updated invoice {invoice.invoice_number}.", user_id=current_user.id)
                 flash(f'Invoice {invoice.invoice_number} updated successfully.', 'success')
                 return redirect(url_for('admin_invoices'))
 
@@ -1483,6 +1512,7 @@ def admin_delete_invoice(invoice_id):
     if invoice_to_delete:
         db.session.delete(invoice_to_delete)
         db.session.commit()
+        log_activity('Invoice Deleted', f"Admin '{current_user.email}' deleted invoice {invoice_number}.", user_id=current_user.id)
         flash(f'Invoice {invoice_to_delete.invoice_number} has been deleted.', 'success')
     else:
         flash('Invoice not found.', 'error')
@@ -1546,7 +1576,7 @@ def admin_create_job_from_request(request_id):
         quote_request.status = 'Scheduled'
         db.session.add(new_job)
         db.session.commit()
-
+        log_activity('Job Created', f"Admin '{current_user.email}' scheduled a new job for request ID {request_id}.", user_id=current_user.id)
         flash('Job has been scheduled successfully.', 'success')
         return redirect(url_for('admin_bookings'))
     
@@ -1583,6 +1613,7 @@ def admin_edit_job(job_id):
                 job.assigned_staff.append(staff_member)
         
         db.session.commit()
+        log_activity('Job Updated', f"Admin '{current_user.email}' updated job ID {job_id}.", user_id=current_user.id)
         flash('Job details updated.', 'success')
         return redirect(url_for('admin_bookings'))
 
@@ -1607,6 +1638,7 @@ def admin_update_job_status(job_id):
     if new_status in ['Scheduled', 'In-Progress', 'Completed', 'Cancelled']:
         job.status = new_status
         db.session.commit()
+        log_activity('Job Status Updated', f"Admin '{current_user.email}' updated status for job ID {job_id} to '{new_status}'.", user_id=current_user.id)
         return jsonify({'status': 'ok', 'message': f'Job status updated to {new_status}', 'new_status': new_status})
     else:
         return jsonify({'status': 'error', 'message': 'Invalid status provided'}), 400
@@ -1633,6 +1665,7 @@ def admin_add_service_category():
         )
         db.session.add(new_category)
         db.session.commit()
+        log_activity('Service Category Created', f"Admin '{current_user.email}' created service category: '{new_category.name}'", user_id=current_user.id)
         flash(f"Category '{form.name.data}' created successfully.", 'success')
         return redirect(url_for('admin_service_categories'))
     return render_template('admin_edit_service_category.html', form=form, title="Add New Service Category")
@@ -1652,6 +1685,7 @@ def admin_edit_service_category(category_id):
         category.description = form.description.data
         category.calculation_method = form.calculation_method.data
         db.session.commit()
+        log_activity('Service Category Updated', f"Admin '{current_user.email}' updated service category: '{category.name}'", user_id=current_user.id)
         flash(f"Category '{form.name.data}' has been updated.", 'success')
         return redirect(url_for('admin_service_categories'))
         
@@ -1665,6 +1699,7 @@ def admin_delete_service_category(category_id):
     if category:
         db.session.delete(category)
         db.session.commit()
+        log_activity('Service Category Deleted', f"Admin '{current_user.email}' deleted service category: '{category_name}'", user_id=current_user.id)
         flash(f"Category '{category.name}' has been deleted.", 'success')
     else:
         flash("Category not found.", "error")
@@ -1718,6 +1753,7 @@ def admin_add_service_price(item_id):
             )
             db.session.add(new_price)
             db.session.commit()
+            log_activity('Service Price Added', f"Admin '{current_user.email}' added a new price (R{new_price.price} for {new_price.frequency}) to service item '{item.name}'.", user_id=current_user.id)
             flash(f"Price added for '{form.frequency.data}'.", 'success')
     else:
         flash("There was an error with the price form.", "error")
@@ -1733,6 +1769,7 @@ def admin_delete_service_price(price_id):
         category_id = price.service_item.category_id
         db.session.delete(price)
         db.session.commit()
+        log_activity('Service Price Deleted', f"Admin '{current_user.email}' deleted a price ({price_details}) from service item '{item_name}'.", user_id=current_user.id)
         flash("Price point has been deleted.", 'success')
         return redirect(url_for('admin_manage_category_items', category_id=category_id))
     else:
@@ -1754,6 +1791,7 @@ def admin_edit_service_item(item_id):
         # item.price = form.price.data <-- This line has been removed
         item.estimated_time_mins = form.estimated_time_mins.data
         db.session.commit()
+        log_activity('Service Item Updated', f"Admin '{current_user.email}' updated service item '{item.name}'.", user_id=current_user.id)
         flash(f"Item '{item.name}' has been updated.", 'success')
         return redirect(url_for('admin_manage_category_items', category_id=item.category_id))
     
@@ -1768,6 +1806,7 @@ def admin_delete_service_item(item_id):
         category_id = item.category_id
         db.session.delete(item)
         db.session.commit()
+        log_activity('Service Item Deleted', f"Admin '{current_user.email}' deleted service item '{item_name}'.", user_id=current_user.id)
         flash(f"Item '{item.name}' has been deleted.", 'success')
         return redirect(url_for('admin_manage_category_items', category_id=category_id))
     else:
@@ -1835,6 +1874,7 @@ def api_quote():
     )
     db.session.add(new_quote_request)
     db.session.commit()
+    log_activity('New Quote Request', f"User '{current_user.email}' submitted a new quote request.", user_id=current_user.id)
     flash("Thank you! We've received your quote request.", "success")
     return jsonify({"status": "ok", "message": "Quote request received."})
 

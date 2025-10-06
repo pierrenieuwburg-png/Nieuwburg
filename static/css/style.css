@@ -1077,7 +1077,8 @@ footer {
 .admin-nav {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 5px;
+  overflow-y: auto;
 }
 .admin-nav-link {
   text-decoration: none;
@@ -1546,4 +1547,62 @@ footer {
   background-color: #f8f9fa;
   border-top: 2px solid #333;
   border-bottom: none;
+}
+/* --- ADMIN LAYOUT (Additions & Modifications) --- */
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 5px; /* Reduced gap between individual links */
+}
+
+.admin-nav-link {
+  display: flex; /* ADD: to align icon and text */
+  align-items: center; /* ADD: to align icon and text */
+  gap: 12px; /* ADD: space between icon and text */
+  text-decoration: none;
+  color: #333;
+  padding: 12px 15px;
+  border-radius: 6px;
+  font-weight: 500;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.admin-nav-link i.fa-fw {
+  font-size: 1rem; /* Adjust icon size if needed */
+  color: #888; /* Give icons a slightly muted color */
+  transition: color 0.2s ease;
+}
+
+.admin-nav-link:hover {
+  background-color: #f0f0f0;
+}
+
+.admin-nav-link.active {
+  background-color: var(--accent);
+  color: white;
+}
+
+.admin-nav-link.active i.fa-fw {
+  color: white; /* Make icon white on active link */
+}
+
+/* NEW: Style for the dividers */
+.nav-divider {
+  border: none;
+  border-top: 1px solid #eef0f2;
+  margin: 10px 0; /* Space around the dividers */
+}
+.admin-sidebar-footer {
+  margin-top: auto;
+  padding-top: 15px; /* Add space above the footer links */
+  border-top: 1px solid #eef0f2; /* Separator line */
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+/* Make footer links consistent with main nav links */
+.admin-sidebar-footer a {
+    font-size: 0.9rem;
+    color: #555;
+    text-decoration: none;
 }
