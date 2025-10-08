@@ -211,11 +211,6 @@ setupModal('join-team-modal', ['join-team-btn'], 'close-join-team-modal-button',
       if (e.target === serviceModal) closeServiceModal();
   });
 
-  // --- Blog Logic ---
-  // if (document.querySelector('.page-blog')) {
-  //  loadPosts();
-  // }
-  
   // --- FAQ Accordion Logic ---
   const faqQuestions = document.querySelectorAll('.faq-question');
   faqQuestions.forEach(question => {
@@ -451,6 +446,254 @@ setupModal('join-team-modal', ['join-team-btn'], 'close-join-team-modal-button',
       if (e.target === deleteModal) closeDeleteModal();
     });
   }
+
+  // --- NEW: Auth Modal and Password Validation ---
+    const authModal = document.getElementById('auth-modal');
+    if (authModal) {
+        const openBtn = document.getElementById('login-nav-btn');
+        const closeBtn = document.getElementById('close-auth-modal-button');
+        const tabLinks = document.querySelectorAll('.auth-tab-link');
+        const forms = document.querySelectorAll('.auth-form-modal');
+        const switchToRegister = document.querySelector('.switch-to-register');
+        const switchToLogin = document.querySelector('.switch-to-login');
+
+    async function handleLoginSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const errorMessageDiv = document.getElementById('login-error-message');
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+
+    errorMessageDiv.style.display = 'none';
+
+    try {
+        const response = await fetch(form.action, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': data.csrf_token
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            window.location.href = result.redirect;
+        } else {
+            errorMessageDiv.className = 'flash error';
+            
+            if (result.status === 'locked') {
+                // --- THIS IS THE NEW LOGIC FOR LOCKED ACCOUNTS ---
+                errorMessageDiv.textContent = result.message;
+
+            } else if (result.status === 'unconfirmed') {
+                // Logic for unconfirmed accounts
+                errorMessageDiv.innerHTML = `
+                    ${result.message} 
+                    <a href="/resend-confirmation/${result.email}" style="font-weight: bold; color: #721c24; text-decoration: underline;">
+                        Resend Confirmation Email
+                    </a>
+                `;
+            } else {
+                // For regular errors like wrong password
+                errorMessageDiv.textContent = result.message;
+            }
+            errorMessageDiv.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        errorMessageDiv.textContent = 'A network error occurred. Please try again.';
+        errorMessageDiv.style.display = 'block';
+    }
+}
+
+async function handleRegisterSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const errorMessageDiv = document.getElementById('register-error-message');
+    const successMessageDiv = document.getElementById('login-error-message'); // Reuse login div for success
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+
+    errorMessageDiv.style.display = 'none';
+    successMessageDiv.style.display = 'none';
+
+    try {
+        const response = await fetch(form.action, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': data.csrf_token
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            // Switch to login tab and show success message
+            document.querySelector('[data-target-form="login-form-modal"]').click();
+            successMessageDiv.textContent = result.message;
+            successMessageDiv.style.backgroundColor = '#d4edda'; // Green for success
+            successMessageDiv.style.color = '#155724';
+            successMessageDiv.style.display = 'block';
+        } else {
+            errorMessageDiv.textContent = result.message;
+            errorMessageDiv.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Registration error:', error);
+        errorMessageDiv.textContent = 'A network error occurred. Please try again.';
+        errorMessageDiv.style.display = 'block';
+    }
+}
+        function showForm(targetId) {
+        forms.forEach(form => form.classList.remove('active'));
+        tabLinks.forEach(tab => tab.classList.remove('active'));
+        document.getElementById(targetId).classList.add('active');
+        document.querySelector(`[data-target-form="${targetId}"]`).classList.add('active');
+    }
+
+    const openModal = () => {
+        authModal.classList.add('visible');
+        showForm('login-form-modal');
+    };
+    const closeModal = () => authModal.classList.remove('visible');
+
+    if (openBtn) openBtn.addEventListener('click', openModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    authModal.addEventListener('click', (e) => {
+        if (e.target === authModal) closeModal();
+    });
+
+    tabLinks.forEach(tab => {
+        tab.addEventListener('click', () => showForm(tab.dataset.targetForm));
+    });
+
+    if (switchToRegister) switchToRegister.addEventListener('click', (e) => {
+        e.preventDefault();
+        showForm('register-form-modal');
+    });
+    if (switchToLogin) switchToLogin.addEventListener('click', (e) => {
+        e.preventDefault();
+        showForm('login-form-modal');
+    });
+
+    const loginForm = document.getElementById('login-form-modal');
+    const registerForm = document.getElementById('register-form-modal');
+    
+    // Attach listeners now that functions are defined in this scope
+    if (loginForm) loginForm.addEventListener('submit', handleLoginSubmit);
+    if (registerForm) registerForm.addEventListener('submit', handleRegisterSubmit);
+    
+    // --- Password Real-time Validation ---
+    const passInput = document.getElementById('register-password');
+    const confirmPassInput = document.getElementById('register-confirm-password');
+    const reqs = {
+        length: document.getElementById('req-length'),
+        upper: document.getElementById('req-upper'),
+        lower: document.getElementById('req-lower'),
+        num: document.getElementById('req-num'),
+        special: document.getElementById('req-special')
+    };
+        
+        const validations = {
+            length: val => val.length >= 8,
+            upper: val => /[A-Z]/.test(val),
+            lower: val => /[a-z]/.test(val),
+            num: val => /[0-9]/.test(val),
+            special: val => /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(val)
+        };
+
+        if (passInput && confirmPassInput) {
+            passInput.addEventListener('input', () => {
+                const passValue = passInput.value;
+                let allValid = true;
+
+                for (const [key, validator] of Object.entries(validations)) {
+                    const reqItem = reqs[key];
+                    if (validator(passValue)) {
+                        reqItem.classList.add('valid');
+                        reqItem.querySelector('i').className = 'fa-solid fa-circle-check';
+                    } else {
+                        reqItem.classList.remove('valid');
+                        reqItem.querySelector('i').className = 'fa-solid fa-circle-xmark';
+                        allValid = false;
+                    }
+                }
+                
+                if (allValid) {
+                    passInput.classList.remove('invalid-input');
+                    passInput.classList.add('valid-input');
+                } else {
+                    passInput.classList.remove('valid-input');
+                    passInput.classList.add('invalid-input');
+                }
+                validateConfirmPassword();
+            });
+
+            confirmPassInput.addEventListener('input', validateConfirmPassword);
+            
+            function validateConfirmPassword() {
+                const passValue = passInput.value;
+                const confirmValue = confirmPassInput.value;
+                
+                if (confirmValue.length > 0 && passValue === confirmValue && validations.length(passValue)) {
+                    passInput.classList.add('valid-input');
+                    confirmPassInput.classList.add('valid-input');
+                    passInput.classList.remove('invalid-input');
+                    confirmPassInput.classList.remove('invalid-input');
+                    
+                    if (!confirmPassInput.classList.contains('matched')) {
+                         passInput.classList.add('flash-success');
+                         confirmPassInput.classList.add('flash-success');
+                         setTimeout(() => {
+                             passInput.classList.remove('flash-success');
+                             confirmPassInput.classList.remove('flash-success');
+                         }, 800);
+                    }
+                    confirmPassInput.classList.add('matched');
+
+                } else if (confirmValue.length > 0) {
+                    confirmPassInput.classList.add('invalid-input');
+                    confirmPassInput.classList.remove('valid-input');
+                    confirmPassInput.classList.remove('matched');
+                } else {
+                    confirmPassInput.className = '';
+                }
+            }
+        }
+    }
+    // --- Handle Redirects to Auth Modal ---
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('action') === 'login_from_redirect') {
+        const authModal = document.getElementById('auth-modal');
+        const openBtn = document.getElementById('login-nav-btn');
+        const successMessageDiv = document.getElementById('login-error-message');
+
+        if (authModal && openBtn && successMessageDiv) {
+            // Programmatically "click" the main login button to open the modal
+            openBtn.click(); 
+
+            // Find the success message that Flask rendered on the main page
+            const mainFlashMessage = document.querySelector('.flash.success');
+            if (mainFlashMessage) {
+                // Move the message text into the modal
+                successMessageDiv.textContent = mainFlashMessage.textContent;
+                successMessageDiv.className = 'flash success'; // Apply success styles
+                successMessageDiv.style.display = 'block';
+                
+                // Hide the original message so it doesn't appear in two places
+                mainFlashMessage.style.display = 'none'; 
+            }
+        }
+
+        // Clean the URL to prevent the modal from re-opening if the user refreshes the page
+        history.replaceState(null, '', window.location.pathname);
+    }
 });
 
 // --- FORM HANDLERS ---

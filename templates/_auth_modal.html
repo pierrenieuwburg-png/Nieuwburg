@@ -1,0 +1,69 @@
+<div id="auth-modal" class="modal-overlay simple-modal">
+    <div class="modal-content auth-modal-content">
+        <button id="close-auth-modal-button" class="modal-close" aria-label="Close form">&times;</button>
+        
+        <div class="auth-tabs">
+            <button class="auth-tab-link active" data-target-form="login-form-modal">Login</button>
+            <button class="auth-tab-link" data-target-form="register-form-modal">Register</button>
+        </div>
+        
+        <form id="login-form-modal" class="auth-form-modal active" method="POST" action="{{ url_for('login') }}">
+            {{ login_form.hidden_tag() }}
+            <div id="login-error-message" class="flash error" style="display: none; margin-top: 0;"></div>
+            <h2 class="auth-title">Welcome Back</h2>
+            <div class="form-group">
+                <label for="login-email">Email</label>
+                <input type="email" id="login-email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label for="login-password">Password</label>
+                <input type="password" id="login-password" name="password" required>
+            </div>
+            <div class="form-group" style="text-align: right; margin-top: -15px; margin-bottom: 10px;">
+                <a href="{{ url_for('request_password_reset') }}" style="font-size: 0.85rem; color: var(--accent); text-decoration: none;">Forgot Password?</a>
+            </div>
+            <button type="submit" class="cta">Login</button>
+            <div class="auth-switch-modal">
+                <p>Don't have an account? <a href="#" class="switch-to-register">Register here</a>.</p>
+            </div>
+            <div style="text-align: center; margin: 20px 0 10px; color: #888; position: relative;">
+                <span style="background-color: #fff; padding: 0 10px; z-index: 1; position: relative;">or</span>
+                <div style="position: absolute; left: 0; right: 0; top: 50%; border-bottom: 1px solid #eee; z-index: 0;"></div>
+            </div>
+            <a href="{{ url_for('google_login') }}" class="cta-google" style="text-decoration: none;">
+                <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google logo" width="20" height="20">
+                <span>Sign in with Google</span>
+            </a>
+        </form>
+
+        <form id="register-form-modal" class="auth-form-modal" method="POST" action="{{ url_for('register') }}">
+            {{ register_form.hidden_tag() }}
+            <div id="register-error-message" class="flash error" style="display: none; margin-top: 0;"></div>
+            <h2 class="auth-title">Create Your Account</h2>
+            <div class="form-group">
+                <label for="register-email">Email</label>
+                <input type="email" id="register-email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label for="register-password">Password</label>
+                <input type="password" id="register-password" name="password" required>
+            </div>
+            
+            <div id="password-reqs" class="password-reqs">
+                <span class="req-item" id="req-length"><i class="fa-solid fa-circle-xmark"></i> At least 8 characters</span>
+                <span class="req-item" id="req-upper"><i class="fa-solid fa-circle-xmark"></i> One uppercase letter</span>
+                <span class="req-item" id="req-lower"><i class="fa-solid fa-circle-xmark"></i> One lowercase letter</span>
+                <span class="req-item" id="req-num"><i class="fa-solid fa-circle-xmark"></i> One number</span>
+                <span class="req-item" id="req-special"><i class="fa-solid fa-circle-xmark"></i> One special character</span>
+            </div>
+            <div class="form-group">
+                <label for="register-confirm-password">Confirm Password</label>
+                <input type="password" id="register-confirm-password" name="confirm_password" required>
+            </div>
+            <button type="submit" class="cta">Create Account</button>
+             <div class="auth-switch-modal">
+                <p>Already have an account? <a href="#" class="switch-to-login">Login here</a>.</p>
+            </div>
+        </form>
+    </div>
+</div>

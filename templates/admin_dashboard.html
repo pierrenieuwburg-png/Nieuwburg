@@ -28,6 +28,77 @@
 
 <div class="admin-section">
   <h2>Recent Activity</h2>
-  <p>Activity feed will be displayed here.</p>
+  <div id="recent-activity-feed">
+    <p>Loading recent activity...</p>
+  </div>
 </div>
+
+<style>
+/* Add some basic styling for the activity feed */
+.activity-item {
+  display: flex;
+  gap: 15px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+.activity-item:last-child {
+  border-bottom: none;
+}
+.activity-time {
+  flex-shrink: 0;
+  width: 100px;
+  color: #666;
+  font-size: 0.85rem;
+}
+.activity-desc {
+  flex-grow: 1;
+}
+.activity-user {
+  flex-shrink: 0;
+  width: 180px;
+  text-align: right;
+  color: #888;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const activityFeed = document.getElementById('recent-activity-feed');
+
+    async function fetchAndUpdateActivity() {
+        try {
+            const response = await fetch('/api/recent-activity');
+            if (!response.ok) {
+                throw new Error('Failed to fetch activity');
+            }
+            const logs = await response.json();
+
+            if (logs.length > 0) {
+                activityFeed.innerHTML = logs.map(log => `
+                    <div class="activity-item">
+                        <div class="activity-time">${log.timestamp}</div>
+                        <div class="activity-desc">${log.description}</div>
+                        <div class="activity-user">${log.user_email}</div>
+                    </div>
+                `).join('');
+            } else {
+                activityFeed.innerHTML = '<p>No recent activity found.</p>';
+            }
+        } catch (error) {
+            console.error('Error fetching activity:', error);
+            activityFeed.innerHTML = '<p style="color: red;">Could not load activity feed.</p>';
+        }
+    }
+
+    // Fetch immediately on page load
+    fetchAndUpdateActivity();
+
+    // Then, fetch every 30 seconds
+    setInterval(fetchAndUpdateActivity, 10000); 
+});
+</script>
 {% endblock %}

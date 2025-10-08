@@ -12,6 +12,7 @@ import os
 import re
 import uuid
 import requests
+from authlib.integrations.flask_client import OAuth
 from markupsafe import Markup
 from wtforms import SelectField, DateField, FieldList, FormField, FloatField, TimeField, SelectMultipleField
 from flask_sqlalchemy import SQLAlchemy
@@ -33,14 +34,35 @@ load_dotenv()
 print("--- Loaded Google Maps API Key:", os.environ.get('GOOGLE_MAPS_API_KEY'), "---")
 from wtforms import StringField, PasswordField, BooleanField, SubmitField, IntegerField
 from flask_wtf.file import FileField, FileAllowed
+from itsdangerous import URLSafeTimedSerializer
+from flask import session as flask_session
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 
-import os
-#print(f"DEBUG: EMAIL_USER is '{os.environ.get('EMAIL_USER')}'")
-#print(f"DEBUG: EMAIL_PASSWORD is '{os.environ.get('EMAIL_PASSWORD')}'")
-
 csrf = CSRFProtect(app)
+oauth = OAuth(app)
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
+
+# --- GOOGLE OAUTH CONFIG ---
+CONF_URL = 'https://accounts.google.com/.well-known/openid-configuration'
+oauth.register(
+    name='google',
+    client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+    client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url=CONF_URL,
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
+)
+
+import os
 
 # --- CONFIGURATION ---
 app.config['SECRET_KEY'] = 'a-very-secret-key-that-you-should-change'
@@ -48,6 +70,7 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30) # Example: log 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(BASE_DIR, 'db.sqlite')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECURITY_PASSWORD_SALT'] = 'a-super-secret-salt-change-it'
 # --- SESSION CONFIGURATION ---
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_PERMANENT'] = False
@@ -95,6 +118,10 @@ class User(UserMixin, db.Model):
     password_reset_required = db.Column(db.Boolean, default=False)
     is_confirmed = db.Column(db.Boolean, nullable=False, default=False)
     confirmed_on = db.Column(db.DateTime, nullable=True)
+
+    failed_login_attempts = db.Column(db.Integer, default=0)
+    locked_until = db.Column(db.DateTime, nullable=True)
+    last_failed_login = db.Column(db.DateTime, nullable=True)
 
     profile = db.relationship('Profile', backref='user', uselist=False, cascade="all, delete-orphan")
     quote_requests = db.relationship('QuoteRequest', backref='user', lazy=True, cascade="all, delete-orphan")
@@ -274,8 +301,23 @@ class Settings(db.Model):
     key = db.Column(db.String(50), unique=True, nullable=False)
     value = db.Column(db.Text, nullable=False)
 
+def generate_confirmation_token(email):
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    return serializer.dumps(email, salt=app.config['SECURITY_PASSWORD_SALT'])
+
+def confirm_token(token, expiration=3600):
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    try:
+        email = serializer.loads(
+            token,
+            salt=app.config['SECURITY_PASSWORD_SALT'],
+            max_age=expiration
+        )
+    except:
+        return False
+    return email
+
 def log_activity(activity_type, description, user_id=None):
-    """Helper function to create a new activity log entry."""
     log = ActivityLog(
         activity_type=activity_type,
         description=description,
@@ -293,6 +335,12 @@ def inject_utility_functions():
         get_next_quote_number=get_next_quote_number,
         get_next_invoice_number=get_next_invoice_number
     )
+
+@app.context_processor
+def inject_auth_forms():
+    login_form = LoginForm()
+    register_form = RegistrationForm()
+    return dict(login_form=login_form, register_form=register_form)
 
 # --- ADMIN CLIENT MANAGEMENT ---
 @app.route('/admin/clients')
@@ -328,6 +376,7 @@ def admin_add_client():
         db.session.add(new_client)
         db.session.add(new_profile)
         db.session.commit()
+        log_activity('Client Created', f"Admin '{current_user.email}' created a new client: {email}", user_id=current_user.id)
         flash('New client added successfully.', 'success')
         return redirect(url_for('admin_clients'))
         
@@ -376,7 +425,9 @@ def admin_delete_client(user_id):
     if current_user.role != 'admin': return redirect(url_for('index'))
     client_to_delete = User.query.get_or_404(user_id)
     if client_to_delete.role == 'client':
+        client_email = client_to_delete.email # FIX: Capture email before deleting
         db.session.delete(client_to_delete)
+        log_activity('Client Deleted', f"Admin '{current_user.email}' deleted client: {client_email}", user_id=current_user.id)
         db.session.commit()
         flash('Client has been deleted.', 'success')
     else:
@@ -443,10 +494,8 @@ def admin_add_staff():
 
         db.session.add(new_staff)
         db.session.add(new_profile)
-        db.session.commit()
-        
-        # Activity Logging
         log_activity('Staff Created', f"Admin '{current_user.email}' created new staff member: {new_staff.email}", user_id=current_user.id)
+        db.session.commit()
         
         try:
             msg = Message(
@@ -519,10 +568,8 @@ def admin_edit_staff(user_id):
         else:
             staff_member.profile.date_of_birth = None
 
-        db.session.commit()
-        
-        # Activity Logging
         log_activity('Staff Updated', f"Admin '{current_user.email}' updated profile for staff member: {staff_member.email}", user_id=current_user.id)
+        db.session.commit()
         
         flash('Staff profile updated successfully.', 'success')
         return redirect(url_for('admin_view_staff', user_id=user_id))
@@ -537,10 +584,10 @@ def admin_delete_staff(user_id):
     if staff_to_delete.role == 'staff':
         staff_email = staff_to_delete.email
         db.session.delete(staff_to_delete)
-        db.session.commit()
         
-        # Activity Logging
         log_activity('Staff Deleted', f"Admin '{current_user.email}' deleted staff member: {staff_email}", user_id=current_user.id)
+        
+        db.session.commit()
         
         flash('Staff member has been deleted.', 'success')
     else:
@@ -564,6 +611,21 @@ class RegistrationForm(FlaskForm):
         EqualTo('password', message='Passwords must match.')
     ])
     submit = SubmitField('Register')
+
+class RequestPasswordResetForm(FlaskForm):
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    submit = SubmitField('Send Reset Instructions')
+
+class ResetPasswordForm(FlaskForm):
+    password = PasswordField('New Password', validators=[
+        DataRequired(),
+        Length(min=8, message='Password must be at least 8 characters long.')
+    ])
+    confirm_password = PasswordField('Confirm New Password', validators=[
+        DataRequired(),
+        EqualTo('password', message='Passwords must match.')
+    ])
+    submit = SubmitField('Reset Password')
 
 class UpdateProfileForm(FlaskForm):
     full_name = StringField('Full Name', validators=[Length(min=0, max=100)])
@@ -710,32 +772,88 @@ def check_password_reset_required():
             return redirect(url_for('change_password'))
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("15 per minute")
 def login():
     if current_user.is_authenticated:
+        # ... (redirect logic is the same)
+        redirect_url = url_for('client_dashboard')
         if current_user.role == 'admin':
-            return redirect(url_for('admin_dashboard'))
+            redirect_url = url_for('admin_dashboard')
         elif current_user.role == 'staff':
-            return redirect(url_for('staff_dashboard'))
-        else:
-            return redirect(url_for('client_dashboard'))
+            redirect_url = url_for('staff_dashboard')
+        return redirect(redirect_url)
 
     form = LoginForm()
     if form.validate_on_submit():
         user = User.query.filter_by(email=form.email.data).first()
-        if not user or not user.check_password(form.password.data):
-            flash('Please check your login details and try again.', 'error')
-            return redirect(url_for('login'))
-        
-        login_user(user, remember=form.remember_me.data)
-        
-        if user.role == 'admin':
-            return redirect(url_for('admin_dashboard'))
-        elif user.role == 'staff':
-            return redirect(url_for('staff_dashboard'))
-        else:
-            return redirect(url_for('client_dashboard'))
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 
-    return render_template('login.html', form=form)
+        # --- NEW & UPDATED LOGIC FROM HERE ---
+
+        if user:
+            # Check if the account is currently locked
+            if user.locked_until and user.locked_until > datetime.utcnow():
+                time_remaining = user.locked_until - datetime.utcnow()
+                minutes_remaining = (time_remaining.total_seconds() + 59) // 60
+                message = f"Account locked due to too many failed login attempts. Please try again in {int(minutes_remaining)} minutes."
+                if is_ajax:
+                    return jsonify({'status': 'locked', 'message': message}), 403
+                flash(message, 'error')
+                return redirect(url_for('index'))
+
+            # Check for unconfirmed email
+            if not user.is_confirmed and user.role == 'client':
+                message = 'Please confirm your email address before logging in.'
+                if is_ajax:
+                    return jsonify({'status': 'unconfirmed', 'message': message, 'email': user.email}), 401
+                flash(message, 'warning')
+                return redirect(url_for('index', action='login_from_redirect'))
+
+            # Check password
+            if not user.check_password(form.password.data):
+                # Increment failed login attempts
+                user.failed_login_attempts += 1
+                user.last_failed_login = datetime.utcnow()
+                
+                # If attempts exceed the threshold, lock the account
+                if user.failed_login_attempts >= 10:
+                    user.locked_until = datetime.utcnow() + timedelta(minutes=15) # Lock for 15 minutes
+                    user.failed_login_attempts = 0 # Reset counter after locking
+                    log_activity('Account Locked', f"Account for user '{user.email}' was locked due to excessive failed login attempts.", user_id=user.id)
+                
+                db.session.commit()
+                message = 'Please check your login details and try again.'
+                if is_ajax:
+                    return jsonify({'status': 'error', 'message': message}), 401
+                flash(message, 'error')
+                return redirect(url_for('index'))
+
+            # --- Successful Login ---
+            # Reset failed attempts counter on successful login
+            user.failed_login_attempts = 0
+            user.locked_until = None
+            db.session.commit()
+            
+            login_user(user, remember=form.remember_me.data)
+            
+            redirect_url = url_for('client_dashboard')
+            if user.role == 'admin':
+                redirect_url = url_for('admin_dashboard')
+            elif user.role == 'staff':
+                redirect_url = url_for('staff_dashboard')
+            
+            if is_ajax:
+                return jsonify({'status': 'ok', 'redirect': redirect_url})
+            return redirect(redirect_url)
+
+        # This block runs if the user was not found at all
+        message = 'Please check your login details and try again.'
+        if is_ajax:
+            return jsonify({'status': 'error', 'message': message}), 401
+        flash(message, 'error')
+        return redirect(url_for('index'))
+
+    return redirect(url_for('index'))
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -743,41 +861,199 @@ def register():
         return redirect(url_for('index'))
 
     form = RegistrationForm()
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
     if form.validate_on_submit():
-        password = form.password.data
-        if len(password) < 8 or not re.search("[a-z]", password) or not re.search("[A-Z]", password) or not re.search("[0-9]", password):
-            flash('Password must contain an uppercase letter, a lowercase letter, and a number.', 'error')
-            return redirect(url_for('register'))
-
         if User.query.filter_by(email=form.email.data).first():
-            flash('Email address already exists.', 'error')
+            message = 'An account with this email address already exists.'
+            if is_ajax:
+                return jsonify({'status': 'error', 'message': message}), 400
+            flash(message, 'error')
             return redirect(url_for('register'))
 
-        new_user = User(email=form.email.data, role='client')
+        new_user = User(email=form.email.data, role='client', is_confirmed=False)
         new_user.set_password(form.password.data)
         db.session.add(new_user)
+        db.session.add(Profile(user=new_user))
 
-        new_profile = Profile(user=new_user)
-        db.session.add(new_profile)
+        token = generate_confirmation_token(new_user.email)
+        confirm_url = url_for('confirm_email', token=token, _external=True)
+        
+        logo_url = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
+        
+        html = render_template('email/activate.html', confirm_url=confirm_url, logo_url=logo_url)
+        
+        try:
+            msg = Message(subject="[Nieuwburg Blitz] Please confirm your email",
+                          sender=app.config['MAIL_USERNAME'],
+                          recipients=[new_user.email],
+                          html=html)
+            mail.send(msg)
+            db.session.commit()
+            message = 'Registration successful! A confirmation email has been sent to your address.'
+            if is_ajax:
+                 return jsonify({'status': 'ok', 'message': message})
+            flash(message, 'success')
+            return redirect(url_for('login'))
+        except Exception as e:
+            db.session.rollback()
+            print(f"CRITICAL: Email sending failed during registration: {e}")
+            message = 'Could not send confirmation email. Please check the address and try again later.'
+            if is_ajax:
+                 return jsonify({'status': 'error', 'message': message}), 500
+            flash(message, 'error')
+            return redirect(url_for('register'))
 
-        db.session.commit()
-        log_activity('New Client Registration', f"New client registered: {new_user.email}", user_id=new_user.id)
-        login_user(new_user)
-
-        flash('Welcome! Please complete your profile.', 'success')
-        return redirect(url_for('profile'))
-
-    for field, errors in form.errors.items():
-        for error in errors:
-            flash(error, 'error')
+    if is_ajax and form.errors:
+        first_error_field = next(iter(form.errors))
+        first_error_message = form.errors[first_error_field][0]
+        return jsonify({'status': 'error', 'message': first_error_message}), 400
 
     return render_template('register.html', form=form)
+
+@app.route('/login/google')
+def google_login():
+    """Redirects to Google's authentication page."""
+    redirect_uri = url_for('authorize', _external=True)
+    return oauth.google.authorize_redirect(redirect_uri)
+
+@app.route('/authorize')
+def authorize():
+    """Callback function that Google redirects to after authentication."""
+    token = oauth.google.authorize_access_token()
+    # The 'userinfo' contains user data like name, email, etc.
+    user_info = token.get('userinfo')
+    
+    if user_info:
+        # Check if user already exists in the database
+        user = User.query.filter_by(email=user_info['email']).first()
+        
+        # If user doesn't exist, create a new one
+        if not user:
+            new_user = User(
+                email=user_info['email'],
+                role='client',
+                is_confirmed=True, # Social logins are confirmed by default
+                confirmed_on=datetime.utcnow()
+            )
+            
+            # Create a profile with the name from Google
+            new_profile = Profile(
+                user=new_user,
+                full_name=user_info['name']
+            )
+            
+            db.session.add(new_user)
+            db.session.add(new_profile)
+            db.session.commit()
+            user = new_user
+
+        # Log the user in
+        login_user(user)
+        flash('You have been successfully logged in with Google.', 'success')
+        return redirect(url_for('client_dashboard'))
+
+    flash('Google login failed. Please try again.', 'error')
+    return redirect(url_for('index'))
+
+@app.route('/resend-confirmation/<email>')
+def resend_confirmation(email):
+    user = User.query.filter_by(email=email).first()
+    if user and not user.is_confirmed:
+        token = generate_confirmation_token(user.email)
+        confirm_url = url_for('confirm_email', token=token, _external=True)
+        logo_url = "https://i.ibb.co/yY51P6Q/Logo-Black-With-Title.png" # Using public URL for now
+        
+        html = render_template('email/activate.html', confirm_url=confirm_url, logo_url=logo_url)
+        msg = Message(subject="[Nieuwburg Blitz] Please Confirm Your Email (Resent)",
+                      sender=app.config['MAIL_USERNAME'],
+                      recipients=[user.email],
+                      html=html)
+        mail.send(msg)
+        flash('A new confirmation email has been sent to your address.', 'success')
+    elif user and user.is_confirmed:
+        flash('This account has already been confirmed. Please log in.', 'info')
+    else:
+        flash('Could not find an account with that email address.', 'error')
+        
+    return redirect(url_for('index', action='login_from_redirect'))
+
+@app.route('/confirm/<token>')
+def confirm_email(token):
+    try:
+        email = confirm_token(token)
+    except:
+        flash('The confirmation link is invalid or has expired.', 'error')
+        return redirect(url_for('index'))
+    
+    user = User.query.filter_by(email=email).first_or_404()
+    
+    # Log the user in automatically if they are confirmed
+    if user.is_confirmed:
+        flash('Account already confirmed. You are now logged in.', 'success')
+        login_user(user) # Log the user in
+        return redirect(url_for('client_dashboard')) # Redirect to their dashboard
+    else:
+        user.is_confirmed = True
+        user.confirmed_on = datetime.utcnow()
+        db.session.commit()
+        log_activity('Account Confirmed', f"User '{user.email}' confirmed their account.", user_id=user.id)
+        flash('Welcome! Your account has been confirmed and you are now logged in.', 'success')
+        login_user(user) # Log the user in
+        return redirect(url_for('client_dashboard')) # Redirect to their dashboard
 
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect(url_for('index'))
+
+@app.route('/request-password-reset', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
+def request_password_reset():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    form = RequestPasswordResetForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(email=form.email.data).first()
+        if user:
+            token = generate_confirmation_token(user.email)
+            reset_url = url_for('reset_password', token=token, _external=True)
+            logo_url = "https://i.ibb.co/yY51P6Q/Logo-Black-With-Title.png" # Using public URL for now
+            
+            html = render_template('email/reset_password.html', reset_url=reset_url, logo_url=logo_url)
+            msg = Message(subject="[Nieuwburg Blitz] Password Reset Instructions",
+                          sender=app.config['MAIL_USERNAME'],
+                          recipients=[user.email],
+                          html=html)
+            mail.send(msg)
+        
+        flash('If an account with that email exists, password reset instructions have been sent.', 'info')
+        return redirect(url_for('index'))
+    return render_template('request_password_reset.html', form=form)
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    try:
+        email = confirm_token(token, expiration=3600) # Token is valid for 1 hour
+        user = User.query.filter_by(email=email).first_or_404()
+    except:
+        flash('The password reset link is invalid or has expired.', 'error')
+        return redirect(url_for('request_password_reset'))
+    
+    form = ResetPasswordForm()
+    if form.validate_on_submit():
+        user.set_password(form.password.data)
+        user.password_reset_required = False 
+        db.session.commit()
+
+        login_user(user)
+        flash('Your password has been updated and you are now logged in!', 'success')
+        return redirect(url_for('client_dashboard')) # Redirect to their dashboard
+        
+    return render_template('reset_password.html', form=form)
 
 @app.route('/change-password', methods=['GET', 'POST'])
 @login_required
@@ -1105,8 +1381,8 @@ def admin_edit_post(post_id):
         post.title = form.title.data
         post.content = form.content.data
         post.excerpt = form.excerpt.data
-        db.session.commit()
         log_activity('Blog Post Updated', f"Admin '{current_user.email}' updated the blog post: '{post.title}'", user_id=current_user.id)
+        db.session.commit()
         flash('Blog post has been updated.', 'success')
         return redirect(url_for('admin_blog'))
         
@@ -1118,9 +1394,11 @@ def admin_delete_post(post_id):
     if current_user.role != 'admin': return redirect(url_for('index'))
     post = db.session.get(Post, post_id)
     if post:
+        post_title = post.title
         db.session.delete(post)
-        db.session.commit()
         log_activity('Blog Post Deleted', f"Admin '{current_user.email}' deleted the blog post: '{post_title}'", user_id=current_user.id)
+        
+        db.session.commit()
         flash('Post has been deleted.', 'success')
     return redirect(url_for('admin_blog'))
 
@@ -1176,8 +1454,8 @@ def admin_create_quote():
             quote.subtotal = subtotal
             quote.total = subtotal
             
-            db.session.commit()
             log_activity('Quote Created', f"Admin '{current_user.email}' created quote {quote.quote_number}.", user_id=current_user.id)
+            db.session.commit()
             flash(f'Draft quote {quote.quote_number} created successfully.', 'success')
             return redirect(url_for('admin_quotes'))
 
@@ -1511,8 +1789,8 @@ def admin_delete_invoice(invoice_id):
     invoice_to_delete = db.session.get(Invoice, invoice_id)
     if invoice_to_delete:
         db.session.delete(invoice_to_delete)
-        db.session.commit()
         log_activity('Invoice Deleted', f"Admin '{current_user.email}' deleted invoice {invoice_number}.", user_id=current_user.id)
+        db.session.commit()
         flash(f'Invoice {invoice_to_delete.invoice_number} has been deleted.', 'success')
     else:
         flash('Invoice not found.', 'error')
@@ -1612,8 +1890,8 @@ def admin_edit_job(job_id):
             if staff_member:
                 job.assigned_staff.append(staff_member)
         
-        db.session.commit()
         log_activity('Job Updated', f"Admin '{current_user.email}' updated job ID {job_id}.", user_id=current_user.id)
+        db.session.commit()
         flash('Job details updated.', 'success')
         return redirect(url_for('admin_bookings'))
 
@@ -1637,8 +1915,8 @@ def admin_update_job_status(job_id):
 
     if new_status in ['Scheduled', 'In-Progress', 'Completed', 'Cancelled']:
         job.status = new_status
-        db.session.commit()
         log_activity('Job Status Updated', f"Admin '{current_user.email}' updated status for job ID {job_id} to '{new_status}'.", user_id=current_user.id)
+        db.session.commit()
         return jsonify({'status': 'ok', 'message': f'Job status updated to {new_status}', 'new_status': new_status})
     else:
         return jsonify({'status': 'error', 'message': 'Invalid status provided'}), 400
@@ -1698,8 +1976,8 @@ def admin_delete_service_category(category_id):
     category = db.session.get(ServiceCategory, category_id)
     if category:
         db.session.delete(category)
-        db.session.commit()
         log_activity('Service Category Deleted', f"Admin '{current_user.email}' deleted service category: '{category_name}'", user_id=current_user.id)
+        db.session.commit()
         flash(f"Category '{category.name}' has been deleted.", 'success')
     else:
         flash("Category not found.", "error")
@@ -1752,8 +2030,8 @@ def admin_add_service_price(item_id):
                 service_item_id=item.id
             )
             db.session.add(new_price)
-            db.session.commit()
             log_activity('Service Price Added', f"Admin '{current_user.email}' added a new price (R{new_price.price} for {new_price.frequency}) to service item '{item.name}'.", user_id=current_user.id)
+            db.session.commit()
             flash(f"Price added for '{form.frequency.data}'.", 'success')
     else:
         flash("There was an error with the price form.", "error")
@@ -1768,8 +2046,8 @@ def admin_delete_service_price(price_id):
     if price:
         category_id = price.service_item.category_id
         db.session.delete(price)
-        db.session.commit()
         log_activity('Service Price Deleted', f"Admin '{current_user.email}' deleted a price ({price_details}) from service item '{item_name}'.", user_id=current_user.id)
+        db.session.commit()
         flash("Price point has been deleted.", 'success')
         return redirect(url_for('admin_manage_category_items', category_id=category_id))
     else:
@@ -1790,8 +2068,8 @@ def admin_edit_service_item(item_id):
         item.name = form.name.data
         # item.price = form.price.data <-- This line has been removed
         item.estimated_time_mins = form.estimated_time_mins.data
-        db.session.commit()
         log_activity('Service Item Updated', f"Admin '{current_user.email}' updated service item '{item.name}'.", user_id=current_user.id)
+        db.session.commit()
         flash(f"Item '{item.name}' has been updated.", 'success')
         return redirect(url_for('admin_manage_category_items', category_id=item.category_id))
     
@@ -1805,8 +2083,8 @@ def admin_delete_service_item(item_id):
     if item:
         category_id = item.category_id
         db.session.delete(item)
-        db.session.commit()
         log_activity('Service Item Deleted', f"Admin '{current_user.email}' deleted service item '{item_name}'.", user_id=current_user.id)
+        db.session.commit()
         flash(f"Item '{item.name}' has been deleted.", 'success')
         return redirect(url_for('admin_manage_category_items', category_id=category_id))
     else:
@@ -1873,8 +2151,8 @@ def api_quote():
         user_id=current_user.id
     )
     db.session.add(new_quote_request)
-    db.session.commit()
     log_activity('New Quote Request', f"User '{current_user.email}' submitted a new quote request.", user_id=current_user.id)
+    db.session.commit()
     flash("Thank you! We've received your quote request.", "success")
     return jsonify({"status": "ok", "message": "Quote request received."})
 
@@ -2039,6 +2317,22 @@ def create_booking():
         db.session.rollback()
         print(f"Error creating booking request: {e}")
         return jsonify({'status': 'error', 'message': 'Could not process your booking request.'}), 500
+    
+@app.route('/api/recent-activity')
+@login_required
+def api_recent_activity():
+    if current_user.role != 'admin':
+        return jsonify({"error": "Permission denied"}), 403
+
+    logs = ActivityLog.query.order_by(ActivityLog.timestamp.desc()).limit(5).all()
+    
+    recent_logs = [{
+        'timestamp': log.timestamp.strftime('%d %b, %H:%M'),
+        'description': log.description,
+        'user_email': log.user.email if log.user else 'System'
+    } for log in logs]
+    
+    return jsonify(recent_logs)
 
 # --- CONTEXT PROCESSOR & MAIN EXECUTION ---
 @app.context_processor

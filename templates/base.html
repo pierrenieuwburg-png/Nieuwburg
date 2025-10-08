@@ -57,7 +57,7 @@
               </div>
             </div>
           {% else %}
-            <a href="{{ url_for('login') }}" class="cta-outline">Login</a>
+            <button class="cta-outline" id="login-nav-btn">Login</button>
             <button class="cta" id="quote-button">Book a Service</button>
           {% endif %}
         </div>
@@ -281,5 +281,7 @@
 
   <script async defer src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&libraries=places&callback=initMap"></script>
   <script src="{{ url_for('static', filename='js/site.js') }}"></script>
+
+  {% include '_auth_modal.html' %}
 </body>
 </html>
