@@ -165,7 +165,7 @@ class Quote(db.Model):
     expiry_date = db.Column(db.Date)
     subtotal = db.Column(db.Float, default=0.0)
     total = db.Column(db.Float, default=0.0)
-    # MODIFIED FOR GUEST QUOTES
+    
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     status = db.Column(db.String(20), nullable=False, default='Draft')
     acceptance_token = db.Column(db.String(100), unique=True, nullable=True)
@@ -173,7 +173,8 @@ class Quote(db.Model):
     guest_email = db.Column(db.String(100))
     guest_phone = db.Column(db.String(20))
     guest_address = db.Column(db.Text)
-    # ---
+    payment_token = db.Column(db.String(100), unique=True, nullable=True)
+    deposit_paid = db.Column(db.Boolean, default=False)
     line_items = db.relationship('QuoteLineItem', backref='quote', lazy=True, cascade="all, delete-orphan")
 
 
@@ -281,6 +282,7 @@ class Post(db.Model):
     created_date = db.Column(db.DateTime, default=datetime.utcnow)
     author_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     author = db.relationship('User', backref=db.backref('posts', lazy=True))
+    is_published = db.Column(db.Boolean, default=False, nullable=False)
 
     def __repr__(self):
         return f'<Post {self.title}>'
@@ -324,6 +326,7 @@ def log_activity(activity_type, description, user_id=None):
         user_id=user_id
     )
     db.session.add(log)
+    db.session.commit()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -433,6 +436,103 @@ def admin_delete_client(user_id):
     else:
         flash('This user is not a client.', 'error')
     return redirect(url_for('admin_clients'))
+
+@app.route('/quote/accept/<int:quote_id>', methods=['POST'])
+@login_required
+def client_accept_quote(quote_id):
+    quote = db.session.get(Quote, quote_id)
+    # Security check
+    if not quote or quote.user_id != current_user.id:
+        flash('Quote not found or permission denied.', 'error')
+        return redirect(url_for('client_dashboard'))
+
+    # Change status and generate a unique, sharable payment token
+    quote.status = 'Accepted'
+    quote.payment_token = str(uuid.uuid4())
+    db.session.commit()
+
+    # Create a placeholder job in the admin panel
+    new_job = Job(
+        quote_request_id=None, # This quote didn't come from an online request
+        scheduled_date=date.today(), # Placeholder date
+        status='Pending Deposit',
+        notes=f"Job created from accepted Quote #{quote.quote_number}. Awaiting 50% deposit."
+    )
+    # Link the job to the quote's user
+    if quote.user:
+        new_job.quote_request = QuoteRequest(user_id=quote.user.id, primary_service=f"From Quote {quote.quote_number}")
+
+    db.session.add(new_job)
+    db.session.commit()
+
+    log_activity('Quote Accepted', f"Client '{current_user.email}' accepted quote {quote.quote_number}.", user_id=current_user.id)
+    flash('Thank you for accepting the quote! A 50% deposit is required to secure your booking.', 'success')
+    return redirect(url_for('client_dashboard'))
+
+
+@app.route('/pay-for-quote/<token>', methods=['GET'])
+def pay_for_quote(token):
+    quote = Quote.query.filter_by(payment_token=token).first()
+    if not quote or quote.status != 'Accepted':
+        flash('This payment link is invalid or the quote has not been accepted.', 'error')
+        return redirect(url_for('index'))
+    
+    deposit_amount = quote.total / 2
+    paystack_key = os.environ.get('PAYSTACK_PUBLIC_KEY')
+    return render_template(
+        'pay_for_quote.html', 
+        quote=quote, 
+        deposit_amount=deposit_amount,
+        paystack_public_key=paystack_key
+    )
+    
+    deposit_amount = quote.total / 2
+    
+    paystack_key = os.environ.get('PAYSTACK_PUBLIC_KEY')
+    return render_template(
+        'pay_for_quote.html', 
+        quote=quote, 
+        deposit_amount=deposit_amount,
+        paystack_public_key=paystack_key
+    )
+
+
+@app.route('/initialize-deposit-payment/<int:quote_id>', methods=['POST'])
+def initialize_deposit_payment(quote_id):
+    quote = db.session.get(Quote, quote_id)
+    if not quote:
+        return jsonify({'error': 'Quote not found'}), 404
+        
+    payer_email = request.json.get('email')
+    if not payer_email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    url = "https://api.paystack.co/transaction/initialize"
+    deposit_amount_kobo = int((quote.total / 2) * 100)
+
+    payload = {
+        "email": payer_email,
+        "amount": deposit_amount_kobo,
+        "currency": "ZAR",
+        "metadata": {
+            "quote_id": quote.id,
+            "payer_name": request.json.get('name')
+        }
+    }
+    headers = {
+        "Authorization": f"Bearer {os.environ.get('PAYSTACK_SECRET_KEY')}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        response_data = response.json()
+        if response_data['status']:
+            return jsonify(response_data['data'])
+        else:
+            return jsonify({'error': 'Could not initialize payment'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # --- ADMIN STAFF MANAGEMENT ---
 @app.route('/admin/staff')
@@ -671,7 +771,9 @@ class PostForm(FlaskForm):
     title = StringField('Title', validators=[DataRequired(), Length(max=200)])
     content = TextAreaField('Full Content', validators=[DataRequired()])
     excerpt = TextAreaField('Excerpt (Short Summary)', validators=[Optional(), Length(max=300)])
+    is_published = BooleanField('Publish this post')
     submit = SubmitField('Save Post')
+    
 
 class QuoteLineItemForm(FlaskForm):
     description = TextAreaField('Description', validators=[DataRequired()])
@@ -1173,7 +1275,24 @@ def admin_dashboard():
     if current_user.role != 'admin':
         flash('You do not have permission to access this page.', 'error')
         return redirect(url_for('index'))
-    return render_template('admin_dashboard.html')
+
+    today = date.today()
+    new_quotes_count = Quote.query.filter_by(status='Draft').count()
+    upcoming_cleans_count = Job.query.filter(
+        Job.scheduled_date >= today,
+        Job.status.in_(['Scheduled', 'In-Progress'])
+    ).count()
+
+    active_clients_count = User.query.filter_by(role='client').count()
+    staff_members_count = User.query.filter_by(role='staff').count()
+
+    return render_template(
+        'admin_dashboard.html',
+        new_quotes_count=new_quotes_count,
+        upcoming_cleans_count=upcoming_cleans_count,
+        active_clients_count=active_clients_count,
+        staff_members_count=staff_members_count
+    )
 
 @app.route('/admin/activity-log')
 @login_required
@@ -1305,8 +1424,17 @@ def client_dashboard():
     if current_user.role != 'client':
         flash('Access denied.', 'error')
         return redirect(url_for('index'))
+
     user_bookings = QuoteRequest.query.filter_by(user_id=current_user.id).order_by(QuoteRequest.request_date.desc()).all()
-    return render_template('client_dashboard.html', bookings=user_bookings)
+    user_quotes = Quote.query.filter_by(user_id=current_user.id).order_by(Quote.quote_date.desc()).all()
+    user_invoices = Invoice.query.filter_by(user_id=current_user.id).order_by(Invoice.invoice_date.desc()).all()
+    
+    return render_template(
+        'client_dashboard.html', 
+        bookings=user_bookings,
+        quotes=user_quotes,
+        invoices=user_invoices
+    )
 
 @app.route('/staff/dashboard')
 @login_required
@@ -1358,7 +1486,8 @@ def admin_add_post():
             title=form.title.data,
             content=form.content.data,
             excerpt=form.excerpt.data,
-            author_id=current_user.id
+            author_id=current_user.id,
+            is_published=form.is_published.data
         )
         db.session.add(new_post)
         db.session.commit()
@@ -1381,6 +1510,8 @@ def admin_edit_post(post_id):
         post.title = form.title.data
         post.content = form.content.data
         post.excerpt = form.excerpt.data
+        post.is_published = form.is_published.data
+
         log_activity('Blog Post Updated', f"Admin '{current_user.email}' updated the blog post: '{post.title}'", user_id=current_user.id)
         db.session.commit()
         flash('Blog post has been updated.', 'success')
@@ -1401,6 +1532,34 @@ def admin_delete_post(post_id):
         db.session.commit()
         flash('Post has been deleted.', 'success')
     return redirect(url_for('admin_blog'))
+
+@app.route('/admin/blog/toggle-status/<int:post_id>', methods=['POST'])
+@login_required
+def admin_toggle_post_status(post_id):
+    if current_user.role != 'admin':
+        return jsonify({'status': 'error', 'message': 'Permission denied'}), 403
+
+    post = db.session.get(Post, post_id)
+    if not post:
+        return jsonify({'status': 'error', 'message': 'Post not found'}), 404
+
+    try:
+        data = request.json
+        new_status = data.get('is_published')
+        if new_status is not None:
+            post.is_published = new_status
+            db.session.commit()
+            log_activity(
+                'Blog Status Changed', 
+                f"Admin '{current_user.email}' changed status of post '{post.title}' to {'Published' if new_status else 'Draft'}", 
+                user_id=current_user.id
+            )
+            return jsonify({'status': 'ok', 'new_status': post.is_published})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    return jsonify({'status': 'error', 'message': 'Invalid request'}), 400
 
 @app.route('/admin/quotes')
 @login_required
@@ -1433,15 +1592,17 @@ def admin_create_quote():
                 expiry_date=form.expiry_date.data,
                 status='Draft'
             )
-            # ... (rest of the function is the same)
+
             if user:
                 quote.user_id = user.id
             else:
                 quote.guest_name = client_name_input
+                quote.guest_email = request.form.get('guest_email_input')
+                quote.acceptance_token = str(uuid.uuid4())
 
             db.session.add(quote)
             db.session.flush()
-            # ... (line item logic) ...
+            
             subtotal = 0
             for item_data in form.line_items.data:
                 item_data.pop('csrf_token', None)
@@ -1555,8 +1716,8 @@ def admin_delete_quote(quote_id):
     quote_to_delete = db.session.get(Quote, quote_id)
     if quote_to_delete:
         db.session.delete(quote_to_delete)
+        log_activity('Quote Deleted', f"Admin '{current_user.email}' deleted quote {quote_to_delete.quote_number}.", user_id=current_user.id)
         db.session.commit()
-        log_activity('Quote Deleted', f"Admin '{current_user.email}' deleted quote {quote_number}.", user_id=current_user.id)
         flash(f'Quote {quote_to_delete.quote_number} has been deleted.', 'success')
     else:
         flash('Quote not found.', 'error')
@@ -1605,6 +1766,91 @@ def get_next_invoice_number():
     except (IndexError, ValueError):
         # Fallback in case of any other parsing error
         return "INV-0061"
+    
+def create_invoice_from_job(job):
+    """
+    Automatically creates an invoice from a completed job's quote request.
+    """
+    if not job.quote_request or not job.quote_request.user:
+        print(f"Cannot create invoice for job {job.id}: missing quote request or user.")
+        return
+
+    # Check if an invoice for this job's request has already been created
+    existing_invoice = Invoice.query.join(QuoteRequest, Invoice.user_id == QuoteRequest.user_id)\
+                                    .filter(QuoteRequest.id == job.quote_request.id).first()
+    if existing_invoice:
+        print(f"Invoice already exists for quote request {job.quote_request.id}.")
+        return
+
+    # Create the new invoice
+    new_invoice = Invoice(
+        invoice_number=get_next_invoice_number(),
+        user_id=job.quote_request.user.id,
+        invoice_date=date.today(),
+        subtotal=job.quote_request.total_price,
+        total=job.quote_request.total_price,
+        due_date=date.today() + timedelta(days=30) # Example: Due in 30 days
+    )
+    db.session.add(new_invoice)
+    db.session.flush() # Flush to get the new_invoice.id
+
+    # Create line items from the service details stored in the quote request
+    try:
+        service_details = json.loads(job.quote_request.service_details)
+        description = f"Service: {job.quote_request.primary_service} ({job.quote_request.property_type})\n"
+        for service in service_details:
+            description += f"- {service.get('name')}"
+            if 'quantity' in service and service.get('quantity') not in ['on', 'off']:
+                 description += f" (Qty: {service.get('quantity')})"
+            description += "\n"
+
+        line_item = InvoiceLineItem(
+            invoice_id=new_invoice.id,
+            description=description.strip(),
+            quantity=1,
+            unit_price=job.quote_request.total_price,
+            amount=job.quote_request.total_price
+        )
+        db.session.add(line_item)
+
+    except (json.JSONDecodeError, TypeError):
+        # Fallback for simple cases or if details are not a valid JSON
+        line_item = InvoiceLineItem(
+            invoice_id=new_invoice.id,
+            description=f"Service for {job.quote_request.primary_service}",
+            quantity=1,
+            unit_price=job.quote_request.total_price,
+            amount=job.quote_request.total_price
+        )
+        db.session.add(line_item)
+    
+    log_activity('Invoice Auto-Generated', f"Invoice {new_invoice.invoice_number} created automatically for completed job ID {job.id}.", user_id=current_user.id)
+    db.session.commit()
+    flash(f'Invoice {new_invoice.invoice_number} has been automatically generated.', 'success')
+    
+@app.route('/dashboard/download/quote/<int:quote_id>')
+@login_required
+def client_download_quote_pdf(quote_id):
+    quote = db.session.get(Quote, quote_id)
+    # SECURITY CHECK: Ensure the quote exists and belongs to the logged-in user
+    if not quote or quote.user_id != current_user.id:
+        flash('Quote not found or you do not have permission to access it.', 'error')
+        return redirect(url_for('client_dashboard'))
+
+    logo_path = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
+    rendered_template = render_template('quote_pdf_template.html', quote=quote, logo_path=logo_path)
+    
+    pdf_result = BytesIO()
+    pisa_status = pisa.CreatePDF(BytesIO(rendered_template.encode('UTF-8')), dest=pdf_result)
+
+    if pisa_status.err:
+        flash('Error generating PDF.', 'error')
+        return redirect(url_for('client_dashboard'))
+
+    pdf_result.seek(0)
+    return Response(pdf_result.getvalue(),
+                    mimetype='application/pdf',
+                    headers={'Content-Disposition': f'attachment;filename=Quote-{quote.quote_number}.pdf'})
 
 @app.route('/admin/invoices')
 @login_required
@@ -1807,10 +2053,29 @@ def admin_download_invoice_pdf(invoice_id):
 
     logo_path = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
     
-    # ADD THIS LINE to get the payment advice
     payment_advice = Settings.query.filter_by(key='payment_advice').first()
 
-    # ADD 'payment_advice' to the context
+    rendered_template = render_template('invoice_pdf_template.html', invoice=invoice, logo_path=logo_path, payment_advice=payment_advice)
+    
+    pdf_result = BytesIO()
+    pisa.CreatePDF(BytesIO(rendered_template.encode('UTF-8')), dest=pdf_result)
+    pdf_result.seek(0)
+    
+    return Response(pdf_result.getvalue(),
+                    mimetype='application/pdf',
+                    headers={'Content-Disposition': f'attachment;filename=Invoice-{invoice.invoice_number}.pdf'})
+
+@app.route('/dashboard/download/invoice/<int:invoice_id>')
+@login_required
+def client_download_invoice_pdf(invoice_id):
+    invoice = db.session.get(Invoice, invoice_id)
+    # SECURITY CHECK: Ensure the invoice exists and belongs to the logged-in user
+    if not invoice or invoice.user_id != current_user.id:
+        flash('Invoice not found or you do not have permission to access it.', 'error')
+        return redirect(url_for('client_dashboard'))
+
+    logo_path = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
+    payment_advice = Settings.query.filter_by(key='payment_advice').first()
     rendered_template = render_template('invoice_pdf_template.html', invoice=invoice, logo_path=logo_path, payment_advice=payment_advice)
     
     pdf_result = BytesIO()
@@ -1915,6 +2180,16 @@ def admin_update_job_status(job_id):
 
     if new_status in ['Scheduled', 'In-Progress', 'Completed', 'Cancelled']:
         job.status = new_status
+        
+        if job.quote_request:
+            job.quote_request.status = new_status
+
+        # --- THIS IS THE NEW LOGIC ---
+        # If the job is completed, automatically generate an invoice
+        if new_status == 'Completed':
+            create_invoice_from_job(job)
+        # --- END OF NEW LOGIC ---
+
         log_activity('Job Status Updated', f"Admin '{current_user.email}' updated status for job ID {job_id} to '{new_status}'.", user_id=current_user.id)
         db.session.commit()
         return jsonify({'status': 'ok', 'message': f'Job status updated to {new_status}', 'new_status': new_status})
@@ -2046,7 +2321,7 @@ def admin_delete_service_price(price_id):
     if price:
         category_id = price.service_item.category_id
         db.session.delete(price)
-        log_activity('Service Price Deleted', f"Admin '{current_user.email}' deleted a price ({price_details}) from service item '{item_name}'.", user_id=current_user.id)
+        log_activity('Service Price Deleted', f"Admin '{current_user.email}' deleted a price ({price.frequency} - R{price.price}) from service item '{price.service_item.name}'.", user_id=current_user.id)
         db.session.commit()
         flash("Price point has been deleted.", 'success')
         return redirect(url_for('admin_manage_category_items', category_id=category_id))
@@ -2083,7 +2358,7 @@ def admin_delete_service_item(item_id):
     if item:
         category_id = item.category_id
         db.session.delete(item)
-        log_activity('Service Item Deleted', f"Admin '{current_user.email}' deleted service item '{item_name}'.", user_id=current_user.id)
+        log_activity('Service Item Deleted', f"Admin '{current_user.email}' deleted service item '{item.name}'.", user_id=current_user.id)
         db.session.commit()
         flash(f"Item '{item.name}' has been deleted.", 'success')
         return redirect(url_for('admin_manage_category_items', category_id=category_id))
@@ -2124,7 +2399,7 @@ BLOG_POSTS = []
 def index(): return render_template('index.html')
 @app.route('/blog')
 def blog():
-    posts = Post.query.order_by(Post.created_date.desc()).all()
+    posts = Post.query.filter_by(is_published=True).order_by(Post.created_date.desc()).all()
     return render_template('blog.html', posts=posts)
 @app.route('/blog/<int:post_id>')
 def post_detail(post_id):
@@ -2204,6 +2479,39 @@ def api_staff_apply():
     except Exception as e:
         # Log the error for debugging
         print(f"Error in staff application: {e}")
+        return jsonify({"status": "error", "message": "An unexpected error occurred. Please try again later."}), 500
+    
+@app.route('/api/contact', methods=['POST'])
+def api_contact():
+    data = request.json
+    try:
+        name = data.get('name')
+        email = data.get('email')
+        phone = data.get('phone') # Added phone
+        area = data.get('area')   # Added area
+        message_body = data.get('message')
+
+        # Updated validation to include phone
+        if not all([name, email, phone, message_body]):
+            return jsonify({"status": "error", "message": "Please fill in all required fields."}), 400
+
+        msg = Message(
+            subject=f"New Quote Request from {name}", # Updated subject
+            sender=app.config['MAIL_USERNAME'],
+            recipients=['hello@nieuwburg.co.za'],
+            # Updated email body with new fields
+            body=f"You have received a new specialized quote request:\n\n"
+                 f"Name: {name}\n"
+                 f"Email: {email}\n"
+                 f"Cellphone: {phone}\n"
+                 f"Service Area: {area or 'Not specified'}\n\n"
+                 f"Message:\n{message_body}"
+        )
+        mail.send(msg)
+        
+        return jsonify({"status": "ok", "message": "Thank you for your request! We will review the details and get back to you with a quote shortly."})
+    except Exception as e:
+        print(f"Error in contact form API: {e}")
         return jsonify({"status": "error", "message": "An unexpected error occurred. Please try again later."}), 500
     
 @app.route('/api/services')
@@ -2380,71 +2688,96 @@ def initialize_payment():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# app.py
-
-# app.py
-
 @app.route('/payment-callback')
 def payment_callback():
     reference = request.args.get('reference')
+    if not reference:
+        flash('Invalid payment callback.', 'error')
+        return redirect(url_for('index'))
+
     url = f"https://api.paystack.co/transaction/verify/{reference}"
-    headers = {
-        "Authorization": f"Bearer {os.environ.get('PAYSTACK_SECRET_KEY')}"
-    }
+    headers = {"Authorization": f"Bearer {os.environ.get('PAYSTACK_SECRET_KEY')}"}
 
     try:
         response = requests.get(url, headers=headers)
         verification_data = response.json()
 
         if verification_data.get('data', {}).get('status') == 'success':
-            booking_data = verification_data['data']['metadata']['booking_details']
+            metadata = verification_data['data']['metadata']
             
-            # Find or create the user and their profile (this part is correct)
-            user = User.query.filter_by(email=booking_data.get('email')).first()
-            if not user:
-                guest_password = str(uuid.uuid4())
-                user = User(email=booking_data.get('email'), role='client')
-                user.set_password(guest_password)
-                db.session.add(user)
-                profile = Profile(user=user, full_name=booking_data.get('name'), phone_number=booking_data.get('phone'), address=booking_data.get('address'))
-                db.session.add(profile)
-                db.session.flush()
+            # --- LOGIC FOR QUOTE DEPOSIT PAYMENTS ---
+            if 'quote_id' in metadata:
+                quote = db.session.get(Quote, metadata['quote_id'])
+                if quote:
+                    quote.deposit_paid = True
+                    quote.status = 'Confirmed'
+                    
+                    # Find the placeholder job created when the quote was accepted
+                    job = Job.query.filter(Job.notes.like(f"%Quote #{quote.quote_number}%")).first()
+                    if job:
+                        job.status = 'Scheduled' # Update status from 'Pending Deposit'
+                    
+                    db.session.commit()
+                    log_activity('Deposit Paid', f"50% deposit paid for Quote {quote.quote_number}.", user_id=quote.user_id)
+                    flash('Thank you! Your deposit has been received and your booking is confirmed.', 'success')
+                    
+                    # Log the user in if they just accepted a guest quote
+                    if not current_user.is_authenticated:
+                        login_user(quote.user)
 
-            # Create the confirmed QuoteRequest
-            new_request = QuoteRequest(
-                user_id=user.id,
-                primary_service=booking_data.get('categoryName'),
-                property_type=booking_data.get('frequency'),
-                # The incorrect 'address' line has been removed from here
-                total_price=float(booking_data.get('totalPrice')),
-                service_details=json.dumps(booking_data.get('services')),
-                status='Confirmed'
-            )
-            db.session.add(new_request)
-            
-            # Create the Job record
-            try:
-                job_date = datetime.strptime(booking_data.get('date'), '%Y-%m-%d').date()
-                job_time = datetime.strptime(booking_data.get('time'), '%H:%M').time()
-            except (ValueError, TypeError):
-                job_date = date.today()
-                job_time = None
+                    return redirect(url_for('client_dashboard'))
 
-            new_job = Job(
-                quote_request=new_request,
-                scheduled_date=job_date,
-                start_time=job_time,
-                status='Scheduled'
-            )
-            db.session.add(new_job)
-            
-            db.session.commit()
-            
-            flash('Payment successful! Your booking is confirmed.', 'success')
-            return redirect(url_for('client_dashboard'))
-        else:
-            flash('Payment verification failed. Please contact support.', 'error')
-            return redirect(url_for('index'))
+            # --- ORIGINAL LOGIC FOR AUTOMATED BOOKINGS ---
+            elif 'booking_details' in metadata:
+                booking_data = metadata['booking_details']
+                
+                user = User.query.filter_by(email=booking_data.get('email')).first()
+                if not user:
+                    guest_password = str(uuid.uuid4())
+                    user = User(email=booking_data.get('email'), role='client', is_confirmed=True, confirmed_on=datetime.utcnow())
+                    user.set_password(guest_password)
+                    db.session.add(user)
+                    profile = Profile(user=user, full_name=booking_data.get('name'), phone_number=booking_data.get('phone'), address=booking_data.get('address'))
+                    db.session.add(profile)
+                    db.session.flush()
+
+                new_request = QuoteRequest(
+                    user_id=user.id,
+                    primary_service=booking_data.get('categoryName'),
+                    property_type=booking_data.get('frequency'),
+                    total_price=float(booking_data.get('totalPrice')),
+                    service_details=json.dumps(booking_data.get('services')),
+                    status='Confirmed'
+                )
+                db.session.add(new_request)
+                
+                try:
+                    job_date = datetime.strptime(booking_data.get('date'), '%Y-%m-%d').date()
+                    job_time = datetime.strptime(booking_data.get('time'), '%H:%M').time()
+                except (ValueError, TypeError):
+                    job_date = date.today()
+                    job_time = None
+
+                new_job = Job(
+                    quote_request=new_request,
+                    scheduled_date=job_date,
+                    start_time=job_time,
+                    status='Scheduled'
+                )
+                db.session.add(new_job)
+                
+                db.session.commit()
+                
+                # Log in the user if they were a guest
+                if not current_user.is_authenticated:
+                    login_user(user)
+
+                flash('Payment successful! Your booking is confirmed.', 'success')
+                return redirect(url_for('client_dashboard'))
+        
+        # Fallback if payment verification fails
+        flash('Payment verification failed. Please contact support.', 'error')
+        return redirect(url_for('index'))
             
     except Exception as e:
         db.session.rollback()

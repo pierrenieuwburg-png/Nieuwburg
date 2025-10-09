@@ -43,12 +43,17 @@
         <td>R{{ "%.2f"|format(quote.total) }}</td>
         <td class="action-buttons">
             <div class="action-dropdown">
-                {# Remove the ▾ character from here #}
                 <button class="action-dropdown-btn" onclick="toggleDropdown(this)"></button> 
                 <div class="action-dropdown-content">
                     <a href="{{ url_for('admin_view_quote', quote_id=quote.id) }}">View</a>
                     <a href="{{ url_for('admin_edit_quote', quote_id=quote.id) }}">Edit</a>
                     <a href="{{ url_for('admin_download_quote_pdf', quote_id=quote.id) }}">Download PDF</a>
+
+                    <form action="{{ url_for('email_quote_to_client', quote_id=quote.id) }}" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" style="color: #006ac6;">Send to Client</button>
+                    </form>
+                    
                     <form action="{{ url_for('admin_delete_quote', quote_id=quote.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this quote?');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" style="color: red;">Delete</button>

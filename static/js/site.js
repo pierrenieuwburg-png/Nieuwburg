@@ -694,6 +694,20 @@ async function handleRegisterSubmit(e) {
         // Clean the URL to prevent the modal from re-opening if the user refreshes the page
         history.replaceState(null, '', window.location.pathname);
     }
+    // --- Specialized Quote Button in Booking Modal ---
+    const specializedQuoteBtn = document.getElementById('specialized-quote-btn');
+    if (specializedQuoteBtn) {
+        specializedQuoteBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            // Close the current booking modal
+            const bookingModal = document.getElementById('booking-modal');
+            if (bookingModal) bookingModal.classList.remove('visible');
+
+            // Open the contact modal
+            const contactModal = document.getElementById('contact-modal');
+            if (contactModal) contactModal.classList.add('visible');
+        });
+    }
 });
 
 // --- FORM HANDLERS ---
@@ -703,14 +717,31 @@ async function handleContactFormSubmit(e) {
   const modal = document.getElementById('contact-modal');
   const modalContent = form.parentElement;
   
-  const data = { name: form.name.value, email: form.email.value, message: form.message.value };
+  const data = { 
+    name: form.name.value, 
+    email: form.email.value, 
+    phone: form.phone.value, 
+    area: form.area.value,
+    message: form.message.value 
+  };
 
   try {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    
     const res = await fetch('/api/contact', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrfToken
+      },
       body: JSON.stringify(data)
     });
+
+    if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || 'A server error occurred.');
+    }
+    
     const json = await res.json();
     
     if (modalContent) {
@@ -725,6 +756,18 @@ async function handleContactFormSubmit(e) {
     }
   } catch (error) {
      console.error("Contact form submission error:", error);
+     if (modalContent) {
+        modalContent.innerHTML = `
+            <button id="close-contact-modal-button" class="modal-close" aria-label="Close contact form">&times;</button>
+            <p style="text-align: center; font-size: 1.1rem; color: #c82333; padding: 40px 0;">
+                <strong>Error:</strong> Could not send message. Please try again later.
+            </p>
+        `;
+        const newCloseButton = modalContent.querySelector('#close-contact-modal-button');
+        if (newCloseButton && modal) {
+            newCloseButton.addEventListener('click', () => modal.classList.remove('visible'));
+        }
+     }
   }
 }
 

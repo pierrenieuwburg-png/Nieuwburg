@@ -2,42 +2,95 @@
 {% block title %}My Dashboard - Nieuwburg Blitz{% endblock %}
 
 {% block content %}
-
 <section class="container bookings-page">
-<div class="profile-header">
-    <div class="profile-header-info">
-      {# ... image and welcome message ... #}
+    <div class="profile-header">
+        <div class="profile-header-info">
+            <h1 class="section-title" style="margin-bottom: 0;">My Dashboard</h1>
+        </div>
+        <div class="profile-header-actions" style="display: flex; gap: 15px;">
+            <a href="{{ url_for('profile') }}" class="cta-outline">Edit Profile</a>
+            <button class="cta" id="dashboard-quote-btn">Book a Service</button>
+        </div>
     </div>
-    <div class="profile-header-actions" style="display: flex; gap: 15px;">
-        <a href="{{ url_for('profile') }}" class="cta-outline">Edit Profile</a>
-        <button class="cta" id="dashboard-quote-btn">Request New Quote</button>
-    </div>
-</div>
 
-<div class="admin-section" style="margin-top: 30px;">
-<h2 style="text-align: left; margin-top: 0;">My Bookings & Quotes</h2>
-<div class="bookings-list">
-{% if bookings %}
-{% for booking in bookings %}
-<div class="booking-item">
-<div class="booking-details">
-<span class="booking-date">Requested on: {{ booking.request_date.strftime('%d %b %Y') }}</span>
-<span class="booking-service">Service: {{ booking.primary_service }}</span>
-<span class="booking-status status-{{ booking.status.lower() }}">{{ booking.status }}</span>
-</div>
-<div class="booking-info">
-<p><strong>Property:</strong> {{ booking.property_type }}</p>
-<p><strong>Frequency:</strong> {{ booking.service_frequency }}</p>
-</div>
-</div>
-{% endfor %}
-{% else %}
-<p>You have not requested any quotes yet.</p>
-{% endif %}
-</div>
-</div>
-<div class="profile-actions" style="margin-top: 40px;">
-  <button id="delete-profile-btn" class="cta-danger">Delete My Profile</button>
-</div>
+    <div class="admin-section" style="margin-top: 30px;">
+        <h2 style="text-align: left; margin-top: 0;">My Quotes</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Quote #</th>
+                    <th>Date</th>
+                    <th>Total</th>
+                    <th style="width: 150px;">Status</th>
+                    <th style="width: 120px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for quote in quotes %}
+                <tr>
+                    <td>{{ quote.quote_number }}</td>
+                    <td>{{ quote.quote_date.strftime('%d %b %Y') }}</td>
+                    <td>R{{ "%.2f"|format(quote.total) }}</td>
+                    <td><span class="booking-status status-{{ quote.status.lower() }}">{{ quote.status }}</span></td>
+                    <td>
+                        <a href="{{ url_for('client_download_quote_pdf', quote_id=quote.id) }}" class="cta-outline-small">Download PDF</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 20px;">You have no quotes on file.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="admin-section" style="margin-top: 40px;">
+        <h2 style="text-align: left; margin-top: 0;">My Invoices</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Invoice #</th>
+                    <th>Date</th>
+                    <th>Total</th>
+                    <th style="width: 120px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for invoice in invoices %}
+                <tr>
+                    <td>{{ invoice.invoice_number }}</td>
+                    <td>{{ invoice.invoice_date.strftime('%d %b %Y') }}</td>
+                    <td>R{{ "%.2f"|format(invoice.total) }}</td>
+                    <td>
+                        <a href="{{ url_for('client_download_invoice_pdf', invoice_id=invoice.id) }}" class="cta-outline-small">Download PDF</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" style="text-align: center; padding: 20px;">You have no invoices on file.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="admin-section" style="margin-top: 40px;">
+        <h2 style="text-align: left; margin-top: 0;">My Booking History</h2>
+        <div class="bookings-list">
+            {% if bookings %}
+                {% for booking in bookings %}
+                <div class="booking-item">
+                    </div>
+                {% endfor %}
+            {% else %}
+                <p>You have not requested any quotes or bookings yet.</p>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="profile-actions" style="margin-top: 40px;">
+      <button id="delete-profile-btn" class="cta-danger">Delete My Profile</button>
+    </div>
 </section>
 {% endblock %}
