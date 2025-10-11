@@ -51,6 +51,30 @@
         
         <hr>
 
+        <h3>HR & Vetting</h3>
+        <div class="form-group">
+            {{ form.strengths.label }}
+            {{ form.strengths(rows=3, class="form-control") }}
+        </div>
+        <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px;">
+                {{ form.has_id_copy(style="width: 20px; height: 20px;") }}
+                {{ form.has_id_copy.label }}
+            </div>
+            <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px;">
+                {{ form.has_drivers_license(style="width: 20px; height: 20px;") }}
+                {{ form.has_drivers_license.label }}
+            </div>
+            <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px;">
+                {{ form.has_criminal_check(style="width: 20px; height: 20px;") }}
+                {{ form.has_criminal_check.label }}
+            </div>
+        </div>
+        <div class="form-group">
+            {{ form.upload_documents.label }}
+            {{ form.upload_documents(class="form-control") }}
+        </div>
+        <hr>
         <div class="form-group">
             <label for="notes">Notes</label>
             <textarea id="notes" name="notes" rows="6" class="form-control">{{ staff_member.profile.notes or '' }}</textarea>

@@ -19,10 +19,11 @@
   <header class="site-header">
     <nav class="nav sticky">
       <div class="nav-inner">
-        <a class="brand" href="/">
-        <img src="{{ url_for('static', filename='img/LogoBlackWithTitle.png') }}" alt="Nieuwburg Blitz Logo">
+        <a class="brand" href="{% if current_user.is_authenticated and current_user.role == 'staff' %}{{ url_for('staff_dashboard') }}{% else %}{{ url_for('index') }}{% endif %}">
+          <img src="{{ url_for('static', filename='img/LogoBlackWithTitle.png') }}" alt="Nieuwburg Blitz Logo">
         </a>
         <ul class="nav-links">
+          {% if not current_user.is_authenticated or current_user.role != 'staff' %}
           <li><a href="/">Home</a></li>
           <li><a href="/#services">Services</a></li>
           <li><a href="/#about">About</a></li>
@@ -30,6 +31,7 @@
           <li><a href="/faq">FAQ</a></li>
           <li><a href="/blog">Blog</a></li>
           <li><a href="#" id="contact-nav-link">Contact</a></li>
+          {% endif %}
         </ul>
         <div class="nav-actions">
           {% if current_user.is_authenticated %}
@@ -47,8 +49,9 @@
               <div class="dropdown-content" id="dropdown-content">
                 {% if current_user.role == 'admin' %}
                   <a href="{{ url_for('admin_dashboard') }}">Admin Dashboard</a>
-                  {% elif current_user.role == 'staff' %}
+                {% elif current_user.role == 'staff' %}
                   <a href="{{ url_for('staff_dashboard') }}">My Schedule</a>
+                  <a href="{{ url_for('staff_banking') }}">My Profile & Banking</a>
                 {% else %}
                   <a href="{{ url_for('client_dashboard') }}">My Dashboard</a>
                 {% endif %}
@@ -314,8 +317,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollToPlugin.min.js"></script>
 
   <script async defer src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&libraries=places&callback=initMap"></script>
+  {% block scripts %}
   <script src="{{ url_for('static', filename='js/site.js') }}"></script>
-
+  {% endblock %}
+  
   {% include '_auth_modal.html' %}
 </body>
 </html>

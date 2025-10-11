@@ -1,3 +1,6 @@
+// --- GLOBAL VARIABLES ---
+let masterTimeline;
+
 const serviceDetails = {
   residential: {
     title: 'Residential Cleaning',
@@ -16,6 +19,88 @@ const serviceDetails = {
     content: `<p>Specializing in end-of-tenancy cleaning, we work with tenants, landlords, and agencies to ensure properties are immaculate for the next occupants. Our blitz cleaning approach guarantees a fast turnaround without compromising on quality, helping you secure your deposit or prepare your property for rent.</p><ul><li>Full property cleaning to agency standards</li><li>Carpet and upholstery cleaning add-ons</li><li>Guaranteed to pass inspection</li><li>Fast and efficient team for quick turnarounds</li></ul>`
   }
 };
+
+// --- NEW REUSABLE PASSWORD VALIDATOR FUNCTION ---
+function initializePasswordValidator() {
+    const passInput = document.getElementById('register-password');
+    if (!passInput) return; // Don't run if the element isn't on the page
+
+    const confirmPassInput = document.getElementById('register-confirm-password');
+    const reqs = {
+        length: document.getElementById('req-length'),
+        upper: document.getElementById('req-upper'),
+        lower: document.getElementById('req-lower'),
+        num: document.getElementById('req-num'),
+        special: document.getElementById('req-special')
+    };
+    
+    const validations = {
+        length: val => val.length >= 8,
+        upper: val => /[A-Z]/.test(val),
+        lower: val => /[a-z]/.test(val),
+        num: val => /[0-9]/.test(val),
+        special: val => /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(val)
+    };
+
+    if (passInput && confirmPassInput) {
+        passInput.addEventListener('input', () => {
+            const passValue = passInput.value;
+            let allValid = true;
+
+            for (const [key, validator] of Object.entries(validations)) {
+                const reqItem = reqs[key];
+                if (validator(passValue)) {
+                    reqItem.classList.add('valid');
+                    reqItem.querySelector('i').className = 'fa-solid fa-circle-check';
+                } else {
+                    reqItem.classList.remove('valid');
+                    reqItem.querySelector('i').className = 'fa-solid fa-circle-xmark';
+                    allValid = false;
+                }
+            }
+            
+            if (allValid) {
+                passInput.classList.remove('invalid-input');
+                passInput.classList.add('valid-input');
+            } else {
+                passInput.classList.remove('valid-input');
+                passInput.classList.add('invalid-input');
+            }
+            validateConfirmPassword();
+        });
+
+        confirmPassInput.addEventListener('input', validateConfirmPassword);
+        
+        function validateConfirmPassword() {
+            const passValue = passInput.value;
+            const confirmValue = confirmPassInput.value;
+            
+            if (confirmValue.length > 0 && passValue === confirmValue && validations.length(passValue)) {
+                passInput.classList.add('valid-input');
+                confirmPassInput.classList.add('valid-input');
+                passInput.classList.remove('invalid-input');
+                confirmPassInput.classList.remove('invalid-input');
+                
+                if (!confirmPassInput.classList.contains('matched')) {
+                     passInput.classList.add('flash-success');
+                     confirmPassInput.classList.add('flash-success');
+                     setTimeout(() => {
+                         passInput.classList.remove('flash-success');
+                         confirmPassInput.classList.remove('flash-success');
+                     }, 800);
+                }
+                confirmPassInput.classList.add('matched');
+
+            } else if (confirmValue.length > 0) {
+                confirmPassInput.classList.add('invalid-input');
+                confirmPassInput.classList.remove('valid-input');
+                confirmPassInput.classList.remove('matched');
+            } else {
+                confirmPassInput.className = '';
+            }
+        }
+    }
+}
 
 document.addEventListener('DOMContentLoaded', function() {
   // --- Profile Image Preview ---
@@ -233,8 +318,8 @@ setupModal('join-team-modal', ['join-team-btn'], 'close-join-team-modal-button',
     });
   });
   
-  // --- Smooth Scroll for Homepage Links ---
-  document.querySelectorAll('a[href^="/#"]').forEach(anchor => {
+// --- Smooth Scroll for Homepage Links ---
+document.querySelectorAll('a[href^="/#"]').forEach(anchor => {
     anchor.addEventListener('click', function(e) {
       if (window.location.pathname === '/') {
         e.preventDefault();
@@ -248,66 +333,12 @@ setupModal('join-team-modal', ['join-team-btn'], 'close-join-team-modal-button',
                     y: targetElement,
                     offsetY: 0
                 },
-                ease: "power2.easeOut"
+                ease: "power2.inOut"
             });
         }
       }
     });
-  });
-
-  // --- Vertical Timeline Animation Logic ---
-  function initProcessAnimation() {
-      const processSection = document.querySelector('#process');
-      if (processSection && typeof gsap !== 'undefined') {
-          gsap.registerPlugin(ScrollTrigger, ScrollToPlugin);
-
-          const timelineItems = gsap.utils.toArray(".timeline-item-vertical");
-          const contentPanels = gsap.utils.toArray(".timeline-content-panel");
-          const timelineProgress = document.querySelector(".timeline-progress");
-          const timelineCta = document.querySelector('.timeline-cta');
-
-          const masterTimeline = gsap.timeline({
-              scrollTrigger: {
-                  trigger: "#process",
-                  start: "top top",
-                  end: "+=4000",
-                  pin: true,
-                  scrub: 1,
-                  anticipatePin: 1
-              }
-          });
-
-          masterTimeline.to(timelineProgress, {
-              height: "100%",
-              duration: 4,
-              ease: "none"
-          }, 0);
-
-          timelineItems.forEach((item, index) => {
-              masterTimeline.add(() => {
-                  timelineItems.forEach(el => el.classList.remove('active'));
-                  item.classList.add('active');
-              }, index);
-              masterTimeline.to(contentPanels[index], {
-                  opacity: 1,
-                  duration: 0.5
-              }, index);
-              if (index < timelineItems.length - 1) {
-                  masterTimeline.to(contentPanels[index], {
-                      opacity: 0,
-                      duration: 0.5
-                  }, index + 0.75);
-              }
-          });
-
-          masterTimeline.to(timelineCta, {
-              opacity: 1,
-              visibility: "visible",
-              duration: 0.5
-          }, 3.5);
-      }
-  }
-  initProcessAnimation();
+});
   
   // --- Testimonial Slider Logic ---
   const testimonialSlider = document.querySelector('.testimonial-slider');
@@ -356,24 +387,26 @@ setupModal('join-team-modal', ['join-team-btn'], 'close-join-team-modal-button',
     startSlider();
   }
   
-  // --- Back to Top Button Logic ---
-  const toTopButton = document.getElementById('back-to-top');
-  if (toTopButton) {
+// --- Back to Top Button Logic ---
+const toTopButton = document.getElementById('back-to-top');
+if (toTopButton) {
     window.addEventListener('scroll', () => {
-      if (window.scrollY > 200) {
-        toTopButton.classList.add('visible');
-      } else {
-        toTopButton.classList.remove('visible');
-      }
+        if (window.scrollY > 200) {
+            toTopButton.classList.add('visible');
+        } else {
+            toTopButton.classList.remove('visible');
+        }
     });
+
     toTopButton.addEventListener('click', (e) => {
-      e.preventDefault();
-      window.scrollTo({
-        top: 0,
-        behavior: 'smooth'
-      });
+        e.preventDefault();
+        gsap.to(window, {
+            duration: 1,
+            scrollTo: 0,
+            ease: "power2.inOut"
+        });
     });
-  }
+}
 
   // --- NEW: Account Deletion Logic ---
   const deleteBtn = document.getElementById('delete-profile-btn');
@@ -485,11 +518,9 @@ setupModal('join-team-modal', ['join-team-btn'], 'close-join-team-modal-button',
             errorMessageDiv.className = 'flash error';
             
             if (result.status === 'locked') {
-                // --- THIS IS THE NEW LOGIC FOR LOCKED ACCOUNTS ---
                 errorMessageDiv.textContent = result.message;
 
             } else if (result.status === 'unconfirmed') {
-                // Logic for unconfirmed accounts
                 errorMessageDiv.innerHTML = `
                     ${result.message} 
                     <a href="/resend-confirmation/${result.email}" style="font-weight: bold; color: #721c24; text-decoration: underline;">
@@ -590,15 +621,7 @@ async function handleRegisterSubmit(e) {
     if (registerForm) registerForm.addEventListener('submit', handleRegisterSubmit);
     
     // --- Password Real-time Validation ---
-    const passInput = document.getElementById('register-password');
-    const confirmPassInput = document.getElementById('register-confirm-password');
-    const reqs = {
-        length: document.getElementById('req-length'),
-        upper: document.getElementById('req-upper'),
-        lower: document.getElementById('req-lower'),
-        num: document.getElementById('req-num'),
-        special: document.getElementById('req-special')
-    };
+    initializePasswordValidator();
         
         const validations = {
             length: val => val.length >= 8,
@@ -983,7 +1006,6 @@ function renderStep1() {
 // --- STEP 2: RENDER ADDRESS & MAP ---
 function renderStep2_Address() {
     showBookingStep(2);
-    // The manual initMap() call has been removed.
     document.getElementById('booking-address-next-btn').onclick = () => {
         const streetAddressInput = document.getElementById('street-address');
         if (!streetAddressInput.value) {
@@ -1239,7 +1261,6 @@ let map;
 let marker;
 let autocomplete;
 
-// The initMap function is now called by the Google Maps API script's callback
 function initMap() {
     if (mapInitialized) {
         return;

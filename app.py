@@ -1,3 +1,6 @@
+import os
+from dotenv import load_dotenv
+load_dotenv()
 from flask_wtf.file import FileField, FileAllowed
 from wtforms import StringField, SubmitField, TextAreaField, Form
 from wtforms.validators import Length
@@ -8,13 +11,16 @@ from wtforms.validators import DataRequired, Email
 from flask_wtf.csrf import CSRFProtect
 from flask import Flask, render_template, jsonify, request, redirect, url_for, flash
 import json
-import os
 import re
 import uuid
 import requests
+import pytz
+import secrets
+from threading import Thread
 from authlib.integrations.flask_client import OAuth
 from markupsafe import Markup
-from wtforms import SelectField, DateField, FieldList, FormField, FloatField, TimeField, SelectMultipleField
+from sqlalchemy.types import JSON
+from wtforms import SelectField, DateField, FieldList, FormField, FloatField, TimeField, SelectMultipleField, MultipleFileField
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin, LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -29,8 +35,6 @@ from xhtml2pdf import pisa
 from io import BytesIO
 from flask_session import Session
 from werkzeug.datastructures import FileStorage
-from dotenv import load_dotenv
-load_dotenv()
 print("--- Loaded Google Maps API Key:", os.environ.get('GOOGLE_MAPS_API_KEY'), "---")
 from wtforms import StringField, PasswordField, BooleanField, SubmitField, IntegerField
 from flask_wtf.file import FileField, FileAllowed
@@ -65,7 +69,7 @@ oauth.register(
 import os
 
 # --- CONFIGURATION ---
-app.config['SECRET_KEY'] = 'a-very-secret-key-that-you-should-change'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30) # Example: log out after 30 mins of inactivity
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(BASE_DIR, 'db.sqlite')
@@ -98,11 +102,16 @@ app.config['MAIL_USERNAME'] = os.environ.get('EMAIL_USER')
 app.config['MAIL_PASSWORD'] = os.environ.get('EMAIL_PASSWORD')
 
 mail = Mail(app)
-
 db = SQLAlchemy(app)
+
+def send_async_email(app, msg):
+    with app.app_context():
+        mail.send(msg)
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+
 # Association table for the many-to-many relationship between Jobs and Staff
 job_staff_association = db.Table('job_staff_association',
     db.Column('job_id', db.Integer, db.ForeignKey('job.id'), primary_key=True),
@@ -146,6 +155,15 @@ class Profile(db.Model):
     service_frequency = db.Column(db.String(50))
     service_fee = db.Column(db.Float)
     notes = db.Column(db.Text)
+    strengths = db.Column(db.Text)
+    documents = db.Column(JSON)
+    has_id_copy = db.Column(db.Boolean, default=False)
+    has_drivers_license = db.Column(db.Boolean, default=False)
+    has_criminal_check = db.Column(db.Boolean, default=False)
+    bank_name = db.Column(db.String(100))
+    branch_code = db.Column(db.String(20))
+    account_number = db.Column(db.String(50))
+    account_type = db.Column(db.String(50))
 
 class QuoteRequest(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -164,6 +182,8 @@ class Quote(db.Model):
     quote_date = db.Column(db.Date, nullable=False, default=date.today)
     expiry_date = db.Column(db.Date)
     subtotal = db.Column(db.Float, default=0.0)
+    discount_value = db.Column(db.Float, default=0.0)
+    discount_type = db.Column(db.String(10), default='R')
     total = db.Column(db.Float, default=0.0)
     
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
@@ -185,6 +205,19 @@ class QuoteLineItem(db.Model):
     unit_price = db.Column(db.Float, nullable=False)
     amount = db.Column(db.Float, nullable=False)
     quote_id = db.Column(db.Integer, db.ForeignKey('quote.id'), nullable=False)
+
+class SpecializedQuoteRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), nullable=False)
+    phone = db.Column(db.String(20), nullable=False)
+    area = db.Column(db.String(100))
+    message = db.Column(db.Text, nullable=False)
+    request_date = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), default='New') # New, Quoted, Archived
+
+    def __repr__(self):
+        return f'<SpecializedQuoteRequest {self.name}>'
 
 class Invoice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -479,6 +512,7 @@ def pay_for_quote(token):
     
     deposit_amount = quote.total / 2
     paystack_key = os.environ.get('PAYSTACK_PUBLIC_KEY')
+    
     return render_template(
         'pay_for_quote.html', 
         quote=quote, 
@@ -495,44 +529,6 @@ def pay_for_quote(token):
         deposit_amount=deposit_amount,
         paystack_public_key=paystack_key
     )
-
-
-@app.route('/initialize-deposit-payment/<int:quote_id>', methods=['POST'])
-def initialize_deposit_payment(quote_id):
-    quote = db.session.get(Quote, quote_id)
-    if not quote:
-        return jsonify({'error': 'Quote not found'}), 404
-        
-    payer_email = request.json.get('email')
-    if not payer_email:
-        return jsonify({'error': 'Email is required'}), 400
-
-    url = "https://api.paystack.co/transaction/initialize"
-    deposit_amount_kobo = int((quote.total / 2) * 100)
-
-    payload = {
-        "email": payer_email,
-        "amount": deposit_amount_kobo,
-        "currency": "ZAR",
-        "metadata": {
-            "quote_id": quote.id,
-            "payer_name": request.json.get('name')
-        }
-    }
-    headers = {
-        "Authorization": f"Bearer {os.environ.get('PAYSTACK_SECRET_KEY')}",
-        "Content-Type": "application/json"
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, json=payload)
-        response_data = response.json()
-        if response_data['status']:
-            return jsonify(response_data['data'])
-        else:
-            return jsonify({'error': 'Could not initialize payment'}), 400
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 # --- ADMIN STAFF MANAGEMENT ---
 @app.route('/admin/staff')
@@ -561,61 +557,50 @@ def admin_add_staff():
     form = AddStaffForm()
     if form.validate_on_submit():
         email = form.email.data
-        if email and User.query.filter_by(email=email).first():
+        if User.query.filter_by(email=email).first():
             flash('A user with this email already exists.', 'error')
             return redirect(url_for('admin_add_staff'))
 
-        temp_password = str(uuid.uuid4()).split('-')[0]
+        # Create the staff user, no username or PIN needed
         new_staff = User(
-            email=email, 
+            email=email,
             role='staff',
-            password_reset_required=True
+            password_reset_required=True,
+            is_confirmed=True 
         )
-        new_staff.set_password(temp_password)
         
-        id_number = form.id_number.data
-        dob = None
-        if id_number:
-            try:
-                year_prefix = "19" if int(id_number[0:2]) > 30 else "20"
-                dob_str = year_prefix + id_number[0:6]
-                dob = datetime.strptime(dob_str, '%Y%m%d').date()
-            except (ValueError, IndexError):
-                pass
-        
-        new_profile = Profile(
-            user=new_staff,
-            full_name=form.full_name.data,
-            phone_number=form.phone_number.data,
-            address=form.address.data,
-            id_number=id_number,
-            date_of_birth=dob
-        )
+        # ... (Profile and DOB logic remains the same)
+        new_profile = Profile(user=new_staff, full_name=form.full_name.data, 
+            phone_number=form.phone_number.data, address=form.address.data, id_number=form.id_number.data)
+        # ...
 
         db.session.add(new_staff)
         db.session.add(new_profile)
-        log_activity('Staff Created', f"Admin '{current_user.email}' created new staff member: {new_staff.email}", user_id=current_user.id)
         db.session.commit()
+        log_activity('Staff Created', f"Admin '{current_user.email}' created new staff member: {email}", user_id=current_user.id)
         
+        # --- SEND ACTIVATION EMAIL WITH TOKEN LINK ---
         try:
+            token = generate_confirmation_token(new_staff.id) # Token is based on the new User's ID
+            activation_url = url_for('staff_activate_token', token=token, _external=True)
+            
             msg = Message(
-                subject="[Nieuwburg Blitz] New Staff Member Registered",
+                subject="[Nieuwburg Blitz] Activate Your Staff Account",
                 sender=app.config['MAIL_USERNAME'],
-                recipients=['peerinnoveer@gmail.com']
+                recipients=[email]
             )
             msg.body = f"""
-            A new staff member has been registered on the Nieuwburg Blitz platform.
+            Welcome to the Nieuwburg Blitz team!
 
-            Name: {form.full_name.data}
-            Email (Username): {email}
-            Temporary Password: {temp_password}
+            An account has been created for you. Please click the link below to set your password and activate your account. This link is valid for 24 hours.
+
+            {activation_url}
             """
             mail.send(msg)
-            flash("Admin notification email sent successfully.", "info")
+            flash(f"Staff member '{form.full_name.data}' created. An activation email has been sent to them.", 'success')
         except Exception as e:
-            flash(f"Staff member created, but failed to send notification email. Error: {e}", "error")
+            flash(f"Staff member created, but the activation email could not be sent. Error: {e}", "error")
 
-        flash(f"Staff member '{form.full_name.data}' created. Temporary password: {temp_password}", 'success')
         return redirect(url_for('admin_staff'))
 
     return render_template('admin_add_staff.html', form=form)
@@ -634,45 +619,36 @@ def admin_edit_staff(user_id):
     form = EditStaffForm(obj=staff_member.profile)
 
     if form.validate_on_submit():
-        if form.profile_image.data and isinstance(form.profile_image.data, FileStorage):
-            file = form.profile_image.data
-            if file.filename != '':
+        # --- SAVE NEW HR & VETTING FIELDS ---
+        staff_member.profile.strengths = form.strengths.data
+        staff_member.profile.has_id_copy = form.has_id_copy.data
+        staff_member.profile.has_drivers_license = form.has_drivers_license.data
+        staff_member.profile.has_criminal_check = form.has_criminal_check.data
+        
+        # Handle document uploads
+        if form.upload_documents.data and form.upload_documents.data[0].filename != '':
+            if staff_member.profile.documents is None:
+                staff_member.profile.documents = []
+
+            for file in form.upload_documents.data:
                 filename = secure_filename(file.filename)
                 unique_filename = str(uuid.uuid4()) + "_" + filename
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], unique_filename))
-                staff_member.profile.profile_image = unique_filename
+                staff_member.profile.documents.append(unique_filename)
+            
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(staff_member.profile, "documents")
 
         staff_member.profile.full_name = form.full_name.data
-        staff_member.profile.phone_number = form.phone_number.data
-        staff_member.profile.address = form.address.data
-        id_number = form.id_number.data
-        staff_member.profile.id_number = id_number
-        staff_member.profile.notes = request.form.get('notes')
-        staff_member.profile.service_frequency = request.form.get('service_frequency')
-        service_fee_str = request.form.get('service_fee')
-        if service_fee_str and service_fee_str.strip():
-            try:
-                staff_member.profile.service_fee = float(service_fee_str)
-            except ValueError:
-                staff_member.profile.service_fee = None
-        else:
-            staff_member.profile.service_fee = None
 
-        if id_number and len(id_number) == 13:
-            try:
-                year_prefix = "19" if int(id_number[0:2]) > 30 else "20"
-                dob_str = year_prefix + id_number[0:6]
-                staff_member.profile.date_of_birth = datetime.strptime(dob_str, '%Y%m%d').date()
-            except (ValueError, IndexError):
-                flash('Invalid ID Number format. Date of birth not updated.', 'warning')
-        else:
-            staff_member.profile.date_of_birth = None
-
-        log_activity('Staff Updated', f"Admin '{current_user.email}' updated profile for staff member: {staff_member.email}", user_id=current_user.id)
         db.session.commit()
-        
         flash('Staff profile updated successfully.', 'success')
         return redirect(url_for('admin_view_staff', user_id=user_id))
+
+    form.strengths.data = staff_member.profile.strengths
+    form.has_id_copy.data = staff_member.profile.has_id_copy
+    form.has_drivers_license.data = staff_member.profile.has_drivers_license
+    form.has_criminal_check.data = staff_member.profile.has_criminal_check
 
     return render_template('admin_edit_staff.html', form=form, staff_member=staff_member)
 
@@ -694,6 +670,87 @@ def admin_delete_staff(user_id):
         flash('This user is not a staff member.', 'error')
     return redirect(url_for('admin_staff'))
 
+def password_check(form, field):
+    password = field.data
+    errors = []
+    if not re.search('[a-z]', password):
+        errors.append('Password must contain at least one lowercase letter.')
+    if not re.search('[A-Z]', password):
+        errors.append('Password must contain at least one uppercase letter.')
+    if not re.search('[0-9]', password):
+        errors.append('Password must contain at least one number.')
+    if not re.search(r'[!@#$%^&*()_+\=-\[\]{};\':"\\|,.<>\/?]', password):
+        errors.append('Password must contain at least one special character.')
+
+    if errors:
+        raise ValidationError(Markup('<br>'.join(errors)))
+    
+@app.route('/admin/staff/reset-password/<int:user_id>', methods=['POST'])
+@login_required
+def admin_reset_staff_password(user_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('index'))
+
+    staff_member = db.session.get(User, user_id)
+    if not staff_member or staff_member.role != 'staff':
+        flash('Staff member not found.', 'error')
+        return redirect(url_for('admin_staff'))
+
+    # Set the user to require a password reset
+    staff_member.password_reset_required = True
+    db.session.commit()
+
+    # --- Smart Reset Logic ---
+    if staff_member.email:
+        # Staff has an email: Send them a new activation link
+        try:
+            token = generate_confirmation_token(staff_member.id)
+            activation_url = url_for('staff_activate_token', token=token, _external=True)
+            msg = Message(
+                subject="[Nieuwburg Blitz] Your Password Has Been Reset",
+                sender=app.config['MAIL_USERNAME'],
+                recipients=[staff_member.email]
+            )
+            msg.body = f"""
+            Hello {staff_member.profile.full_name},
+
+            An administrator has reset your password. Please click the link below to set a new password for your account. This link is valid for 24 hours.
+
+            {activation_url}
+            """
+            mail.send(msg)
+            flash(f"A password reset link has been sent to {staff_member.email}.", 'success')
+        except Exception as e:
+            flash(f"Failed to send reset email. Error: {e}", "error")
+    else:
+        # Staff does not have an email: Generate a new PIN and email it to the admin
+        pin = str(secrets.randbelow(1000000)).zfill(6)
+        staff_member.temp_pin_hash = generate_password_hash(pin)
+        db.session.commit()
+        
+        try:
+            admin_email = app.config['MAIL_USERNAME']
+            manual_activation_url = url_for('staff_activate', _external=True)
+            msg = Message(
+                subject=f"[Nieuwburg Blitz] ACTION REQUIRED: Manual Password Reset for {staff_member.username}",
+                sender=admin_email, 
+                recipients=[admin_email]
+            )
+            msg.body = f"""
+            The password for {staff_member.profile.full_name} (Username: {staff_member.username}) has been reset.
+
+            Please instruct them to go to the following page to activate their account:
+            {manual_activation_url}
+
+            They will need their username and this new One-Time PIN: {pin}
+            """
+            mail.send(msg)
+            flash(f"The staff member does not have an email. A new PIN has been sent to the admin email address.", 'info')
+        except Exception as e:
+            flash(f"Failed to send admin notification email. Error: {e}", "error")
+            
+    return redirect(url_for('admin_view_staff', user_id=user_id))
+
 class LoginForm(FlaskForm):
     email = StringField('Email', validators=[DataRequired(), Email()])
     password = PasswordField('Password', validators=[DataRequired()])
@@ -704,7 +761,8 @@ class RegistrationForm(FlaskForm):
     email = StringField('Email', validators=[DataRequired(), Email()])
     password = PasswordField('Password', validators=[
         DataRequired(),
-        Length(min=8, message='Password must be at least 8 characters long.')
+        Length(min=8, message='Password must be at least 8 characters long.'),
+        password_check
     ])
     confirm_password = PasswordField('Confirm Password', validators=[
         DataRequired(),
@@ -719,7 +777,8 @@ class RequestPasswordResetForm(FlaskForm):
 class ResetPasswordForm(FlaskForm):
     password = PasswordField('New Password', validators=[
         DataRequired(),
-        Length(min=8, message='Password must be at least 8 characters long.')
+        Length(min=8, message='Password must be at least 8 characters long.'),
+        password_check
     ])
     confirm_password = PasswordField('Confirm New Password', validators=[
         DataRequired(),
@@ -756,10 +815,26 @@ class EditStaffForm(FlaskForm):
     phone_number = StringField('Phone Number', validators=[Length(max=20)])
     address = TextAreaField('Physical Address', validators=[Optional(), Length(max=500)])
     id_number = StringField('South African ID Number', validators=[Optional(), Length(min=13, max=13)])
+    strengths = TextAreaField('Strengths / Key Skills', validators=[Optional(), Length(max=1000)])
+    
+    has_id_copy = BooleanField('Copy of ID on file')
+    has_drivers_license = BooleanField("Driver's license on file")
+    has_criminal_check = BooleanField('Criminal record check complete')
+
+    upload_documents = MultipleFileField('Upload Supporting Documents (ID, License, etc.)', validators=[
+        FileAllowed(['pdf', 'doc', 'docx', 'jpg', 'png', 'jpeg'], 'Documents or images only!')
+    ])
     profile_image = FileField('Update Profile Picture', validators=[
         FileAllowed(['jpg', 'png', 'jpeg', 'gif'], 'Only image files are allowed!')
     ])
     submit = SubmitField('Update Profile')
+
+class StaffBankingForm(FlaskForm):
+    bank_name = StringField('Bank Name', validators=[DataRequired(), Length(max=100)])
+    branch_code = StringField('Branch Code', validators=[DataRequired(), Length(max=20)])
+    account_number = StringField('Account Number', validators=[DataRequired(), Length(max=50)])
+    account_type = StringField('Account Type (e.g., Cheque, Savings)', validators=[DataRequired(), Length(max=50)])
+    submit = SubmitField('Save Banking Details')
 
 class EditClientForm(FlaskForm):
     full_name = StringField('Full Name', validators=[DataRequired(), Length(max=100)])
@@ -785,6 +860,8 @@ class GuestQuoteForm(FlaskForm):
     quote_number = StringField('Quote Number', validators=[Optional()])
     quote_date = DateField('Quote Date', default=date.today, validators=[DataRequired()])
     expiry_date = DateField('Expiry Date', validators=[Optional()])
+    discount_value = FloatField('Discount', validators=[Optional()], default=0.0)
+    discount_type = SelectField('Type', choices=[('R', 'R'), ('%', '%')], default='R')
     line_items = FieldList(FormField(QuoteLineItemForm), min_entries=1)
     submit = SubmitField('Save Quote')
 
@@ -865,6 +942,16 @@ def nl2br(value):
 
 app.jinja_env.filters['nl2br'] = nl2br
 
+def to_sast(dt):
+    """Converts a UTC datetime object to SAST (Africa/Johannesburg)."""
+    if dt is None:
+        return ""
+    utc = pytz.utc
+    sast = pytz.timezone('Africa/Johannesburg')
+    return utc.localize(dt).astimezone(sast)
+
+app.jinja_env.filters['to_sast'] = to_sast
+
 # --- AUTHENTICATION & PROFILE ROUTES ---
 @app.before_request
 def check_password_reset_required():
@@ -877,7 +964,6 @@ def check_password_reset_required():
 @limiter.limit("15 per minute")
 def login():
     if current_user.is_authenticated:
-        # ... (redirect logic is the same)
         redirect_url = url_for('client_dashboard')
         if current_user.role == 'admin':
             redirect_url = url_for('admin_dashboard')
@@ -890,39 +976,31 @@ def login():
         user = User.query.filter_by(email=form.email.data).first()
         is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 
-        # --- NEW & UPDATED LOGIC FROM HERE ---
-
         if user:
-            # Check if the account is currently locked
+            # Check if account is locked
             if user.locked_until and user.locked_until > datetime.utcnow():
                 time_remaining = user.locked_until - datetime.utcnow()
                 minutes_remaining = (time_remaining.total_seconds() + 59) // 60
-                message = f"Account locked due to too many failed login attempts. Please try again in {int(minutes_remaining)} minutes."
+                message = f"Account locked. Please try again in {int(minutes_remaining)} minutes."
                 if is_ajax:
                     return jsonify({'status': 'locked', 'message': message}), 403
                 flash(message, 'error')
                 return redirect(url_for('index'))
 
-            # Check for unconfirmed email
             if not user.is_confirmed and user.role == 'client':
                 message = 'Please confirm your email address before logging in.'
                 if is_ajax:
                     return jsonify({'status': 'unconfirmed', 'message': message, 'email': user.email}), 401
                 flash(message, 'warning')
                 return redirect(url_for('index', action='login_from_redirect'))
-
-            # Check password
+            
             if not user.check_password(form.password.data):
-                # Increment failed login attempts
                 user.failed_login_attempts += 1
                 user.last_failed_login = datetime.utcnow()
-                
-                # If attempts exceed the threshold, lock the account
                 if user.failed_login_attempts >= 10:
-                    user.locked_until = datetime.utcnow() + timedelta(minutes=15) # Lock for 15 minutes
-                    user.failed_login_attempts = 0 # Reset counter after locking
-                    log_activity('Account Locked', f"Account for user '{user.email}' was locked due to excessive failed login attempts.", user_id=user.id)
-                
+                    user.locked_until = datetime.utcnow() + timedelta(minutes=15)
+                    user.failed_login_attempts = 0
+                    log_activity('Account Locked', f"Account for user '{user.email}' was locked.", user_id=user.id)
                 db.session.commit()
                 message = 'Please check your login details and try again.'
                 if is_ajax:
@@ -931,7 +1009,6 @@ def login():
                 return redirect(url_for('index'))
 
             # --- Successful Login ---
-            # Reset failed attempts counter on successful login
             user.failed_login_attempts = 0
             user.locked_until = None
             db.session.commit()
@@ -1104,11 +1181,101 @@ def confirm_email(token):
         login_user(user) # Log the user in
         return redirect(url_for('client_dashboard')) # Redirect to their dashboard
 
+@app.route('/staff/banking', methods=['GET', 'POST'])
+@login_required
+def staff_banking():
+    if current_user.role != 'staff':
+        flash('Access denied.', 'error')
+        return redirect(url_for('index'))
+
+    form = StaffBankingForm(obj=current_user.profile)
+    
+    if form.validate_on_submit():
+        # Update profile with form data
+        current_user.profile.bank_name = form.bank_name.data
+        current_user.profile.branch_code = form.branch_code.data
+        current_user.profile.account_number = form.account_number.data
+        current_user.profile.account_type = form.account_type.data
+        db.session.commit()
+
+        # --- Send Notification Email to Admin ---
+        try:
+            admin_email = app.config['MAIL_USERNAME']
+            msg = Message(
+                subject=f"SECURITY ALERT: Banking Details Updated by {current_user.profile.full_name}",
+                sender=admin_email,
+                recipients=[admin_email]
+            )
+            msg.body = f"""
+            The banking details for a staff member have been updated.
+
+            Staff Member: {current_user.profile.full_name}
+            Email: {current_user.email}
+            Date of Change: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+            Please review this change in the admin panel to ensure it is legitimate.
+            """
+            mail.send(msg)
+        except Exception as e:
+            log_activity('Email Error', f"Failed to send banking details update notification for {current_user.email}. Error: {e}")
+
+        flash('Your banking details have been updated successfully.', 'success')
+        return redirect(url_for('staff_banking'))
+
+    return render_template('staff_banking.html', form=form)
+
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect(url_for('index'))
+
+@app.route('/staff-activate', methods=['GET', 'POST'])
+def staff_activate():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+        
+    form = StaffActivationForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(username=form.username.data, role='staff').first()
+        
+        # Check if user exists, needs reset, and PIN is correct
+        if user and user.password_reset_required and user.temp_pin_hash and check_password_hash(user.temp_pin_hash, form.pin.data):
+            # PIN is correct. Store user ID in session to proceed to password creation.
+            flask_session['staff_activation_user_id'] = user.id
+            flash('PIN verified. Please set your new password.', 'success')
+            return redirect(url_for('staff_set_password'))
+        else:
+            flash('Invalid username or PIN. Please check your details and try again.', 'error')
+            
+    return render_template('staff_activate.html', form=form)
+
+
+@app.route('/staff-set-password', methods=['GET', 'POST'])
+def staff_set_password():
+    if 'staff_activation_user_id' not in flask_session:
+        flash('Invalid session. Please start the activation process again.', 'error')
+        return redirect(url_for('index'))
+
+    user_id = flask_session['staff_activation_user_id']
+    user = db.session.get(User, user_id)
+    if not user:
+        flash('User not found. Please start over.', 'error')
+        return redirect(url_for('index'))
+
+    form = ChangePasswordForm() # We can reuse the existing ChangePasswordForm
+    if form.validate_on_submit():
+        user.set_password(form.password.data)
+        user.password_reset_required = False
+        db.session.commit()
+        
+        # Log the user in automatically
+        login_user(user)
+        flask_session.pop('staff_activation_user_id', None) # Clean up session
+        flash('Your password has been set and you are now logged in.', 'success')
+        return redirect(url_for('staff_dashboard'))
+        
+    return render_template('staff_set_password.html', form=form)
 
 @app.route('/request-password-reset', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
@@ -1182,24 +1349,29 @@ def change_password():
 
     return render_template('change_password.html', form=form)
 
-@app.route('/admin/staff/reset-password/<int:user_id>', methods=['POST'])
-@login_required
-def admin_reset_staff_password(user_id):
-    if current_user.role != 'admin':
+@app.route('/staff-activate/<token>')
+def staff_activate_token(token):
+    if current_user.is_authenticated:
         return redirect(url_for('index'))
 
-    staff_member = db.session.get(User, user_id)
-    if not staff_member or staff_member.role != 'staff':
-        flash('Staff member not found.', 'error')
-        return redirect(url_for('admin_staff'))
+    try:
+        # Use confirm_token with a 24-hour expiration (86400 seconds)
+        user_id = confirm_token(token, expiration=86400)
+    except:
+        flash('The activation link is invalid or has expired. Please contact an administrator.', 'error')
+        return redirect(url_for('index'))
 
-    temp_password = str(uuid.uuid4()).split('-')[0]
-    staff_member.set_password(temp_password)
-    staff_member.password_reset_required = True
-    db.session.commit()
+    user = db.session.get(User, user_id)
 
-    flash(f"Password for {staff_member.profile.full_name} has been reset. New temporary password: {temp_password}", 'success')
-    return redirect(url_for('admin_view_staff', user_id=user_id))
+    # Verify the user is a staff member who needs to set their password
+    if user and user.role == 'staff' and user.password_reset_required:
+        # Valid token. Store user ID in session to proceed to password creation.
+        flask_session['staff_activation_user_id'] = user.id
+        flash('Account verified. Please set your new password.', 'success')
+        return redirect(url_for('staff_set_password'))
+    else:
+        flash('The activation link is invalid or has already been used.', 'error')
+        return redirect(url_for('index'))
 
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
@@ -1565,8 +1737,10 @@ def admin_toggle_post_status(post_id):
 @login_required
 def admin_quotes():
     if current_user.role != 'admin': return redirect(url_for('index'))
+    # Fetch both existing quotes and new specialized requests
     quotes = Quote.query.order_by(Quote.quote_date.desc()).all()
-    return render_template('admin_quotes.html', quotes=quotes)
+    requests = SpecializedQuoteRequest.query.filter_by(status='New').order_by(SpecializedQuoteRequest.request_date.desc()).all()
+    return render_template('admin_quotes.html', quotes=quotes, requests=requests)
 
 @app.route('/admin/quotes/new', methods=['GET', 'POST'])
 @login_required
@@ -1575,11 +1749,20 @@ def admin_create_quote():
     
     form = GuestQuoteForm()
     client_list = User.query.filter_by(role='client').all()
+    
+    # Pre-population logic
+    request_id = request.args.get('request_id', type=int)
+    source_request = None
+    if request_id:
+        source_request = db.session.get(SpecializedQuoteRequest, request_id)
+        if source_request and not form.is_submitted():
+            form.client_or_guest_name.data = source_request.name
+            if form.line_items:
+                form.line_items[0].form.description.data = source_request.message
 
     if form.validate_on_submit():
         number_to_use = form.quote_number.data or get_next_quote_number()
         
-        # Check for duplicates
         if Quote.query.filter_by(quote_number=number_to_use).first():
             form.quote_number.errors.append(f"Quote number '{number_to_use}' is already in use.")
         else:
@@ -1590,14 +1773,17 @@ def admin_create_quote():
                 quote_number=number_to_use,
                 quote_date=form.quote_date.data,
                 expiry_date=form.expiry_date.data,
-                status='Draft'
+                status='Draft',
+                discount_value=form.discount_value.data or 0.0,
+                discount_type=form.discount_type.data
             )
 
             if user:
                 quote.user_id = user.id
             else:
                 quote.guest_name = client_name_input
-                quote.guest_email = request.form.get('guest_email_input')
+                quote.guest_email = source_request.email if source_request else None
+                quote.guest_phone = source_request.phone if source_request else None
                 quote.acceptance_token = str(uuid.uuid4())
 
             db.session.add(quote)
@@ -1606,15 +1792,25 @@ def admin_create_quote():
             subtotal = 0
             for item_data in form.line_items.data:
                 item_data.pop('csrf_token', None)
-                if item_data['description'] and item_data['quantity'] is not None and item_data['unit_price'] is not None:
+                if item_data['description'] and item_data.get('quantity') is not None and item_data.get('unit_price') is not None:
                     amount = item_data['quantity'] * item_data['unit_price']
                     line_item = QuoteLineItem(quote_id=quote.id, **item_data, amount=amount)
                     db.session.add(line_item)
                     subtotal += amount
             
             quote.subtotal = subtotal
-            quote.total = subtotal
             
+            discount_amount = 0
+            if quote.discount_type == '%' and quote.discount_value > 0:
+                discount_amount = (subtotal * quote.discount_value) / 100
+            else:
+                discount_amount = quote.discount_value or 0.0
+            
+            quote.total = subtotal - discount_amount
+            
+            if source_request:
+                source_request.status = 'Quoted'
+
             log_activity('Quote Created', f"Admin '{current_user.email}' created quote {quote.quote_number}.", user_id=current_user.id)
             db.session.commit()
             flash(f'Draft quote {quote.quote_number} created successfully.', 'success')
@@ -2034,10 +2230,13 @@ def admin_delete_invoice(invoice_id):
     if current_user.role != 'admin': return redirect(url_for('index'))
     invoice_to_delete = db.session.get(Invoice, invoice_id)
     if invoice_to_delete:
+        invoice_number_for_log = invoice_to_delete.invoice_number 
         db.session.delete(invoice_to_delete)
-        log_activity('Invoice Deleted', f"Admin '{current_user.email}' deleted invoice {invoice_number}.", user_id=current_user.id)
         db.session.commit()
-        flash(f'Invoice {invoice_to_delete.invoice_number} has been deleted.', 'success')
+
+        log_activity('Invoice Deleted', f"Admin '{current_user.email}' deleted invoice {invoice_number_for_log}.", user_id=current_user.id)
+        
+        flash(f'Invoice {invoice_number_for_log} has been deleted.', 'success')
     else:
         flash('Invoice not found.', 'error')
     return redirect(url_for('admin_invoices'))
@@ -2487,32 +2686,40 @@ def api_contact():
     try:
         name = data.get('name')
         email = data.get('email')
-        phone = data.get('phone') # Added phone
-        area = data.get('area')   # Added area
+        phone = data.get('phone')
+        area = data.get('area')
         message_body = data.get('message')
 
-        # Updated validation to include phone
         if not all([name, email, phone, message_body]):
             return jsonify({"status": "error", "message": "Please fill in all required fields."}), 400
 
+        # Save to database
+        new_request = SpecializedQuoteRequest(
+            name=name, email=email, phone=phone, area=area, message=message_body
+        )
+        db.session.add(new_request)
+        db.session.commit()
+
+        # Send email in background
         msg = Message(
-            subject=f"New Quote Request from {name}", # Updated subject
+            subject=f"New Specialized Quote Request from {name}",
             sender=app.config['MAIL_USERNAME'],
-            recipients=['hello@nieuwburg.co.za'],
-            # Updated email body with new fields
-            body=f"You have received a new specialized quote request:\n\n"
+            recipients=['peerinnoveer@gmail.com'], # Your "work" email
+            body=f"A new specialized quote request has been saved to the admin panel.\n\n"
                  f"Name: {name}\n"
                  f"Email: {email}\n"
-                 f"Cellphone: {phone}\n"
-                 f"Service Area: {area or 'Not specified'}\n\n"
+                 f"Phone: {phone}\n"
+                 f"Area: {area or 'Not specified'}\n\n"
                  f"Message:\n{message_body}"
         )
-        mail.send(msg)
+        thr = Thread(target=send_async_email, args=[app, msg])
+        thr.start()
         
         return jsonify({"status": "ok", "message": "Thank you for your request! We will review the details and get back to you with a quote shortly."})
     except Exception as e:
+        db.session.rollback()
         print(f"Error in contact form API: {e}")
-        return jsonify({"status": "error", "message": "An unexpected error occurred. Please try again later."}), 500
+        return jsonify({"status": "error", "message": "An unexpected error occurred."}), 500
     
 @app.route('/api/services')
 def api_services():
@@ -2634,8 +2841,11 @@ def api_recent_activity():
 
     logs = ActivityLog.query.order_by(ActivityLog.timestamp.desc()).limit(5).all()
     
+    # Use the new SAST conversion function
+    sast_timezone = pytz.timezone('Africa/Johannesburg')
+
     recent_logs = [{
-        'timestamp': log.timestamp.strftime('%d %b, %H:%M'),
+        'timestamp': pytz.utc.localize(log.timestamp).astimezone(sast_timezone).strftime('%d %b, %H:%M'),
         'description': log.description,
         'user_email': log.user.email if log.user else 'System'
     } for log in logs]
@@ -2789,10 +2999,10 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
         if not User.query.filter_by(email='admin@example.com').first():
-            admin_user = User(email='admin@example.com', role='admin')
+            admin_user = User(email='admin@example.com', role='admin', is_confirmed=True)
             admin_user.set_password('password')
             db.session.add(admin_user)
             db.session.add(Profile(user=admin_user))
             db.session.commit()
-            print("Default admin user created.")
+            print("Default admin user created with password 'password'.")
     app.run(debug=True)

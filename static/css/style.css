@@ -269,121 +269,6 @@ main {
   z-index: 1; /* ADD THIS */
 }
 
-/* --- Process Timeline Section (Vertical Pin & Scrub) --- */
-#process {
-  background-color: #fff;
-  position: relative;
-  overflow: hidden;
-  min-height: 100vh;
-}
-.process-container-split {
-  display: grid;
-  grid-template-columns: 1fr 1.2fr;
-  align-items: center;
-  gap: 30px;
-  height: 100vh;
-  max-width: 1300px;
-  margin: 0 auto;
-  padding: 0 24px;
-}
-.timeline-left-vertical {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-around;
-  height: 80%;
-}
-.timeline-left-vertical::before {
-  content: '';
-  position: absolute;
-  left: 32px;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background-color: #f0f0f0;
-  z-index: 0;
-}
-.timeline-progress {
-  position: absolute;
-  left: 32px;
-  top: 0;
-  width: 4px;
-  background-color: var(--accent);
-  height: 0;
-  z-index: 1;
-}
-.timeline-item-vertical {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  position: relative;
-  z-index: 2;
-  cursor: pointer;
-}
-.timeline-step {
-  width: 60px;
-  height: 60px;
-  background-color: #fff;
-  color: #ccc;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.5rem;
-  font-weight: bold;
-  flex-shrink: 0;
-  border: 4px solid #f0f0f0;
-  transition: all 0.3s ease;
-}
-.timeline-item-vertical.active .timeline-step {
-  background-color: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-  transform: scale(1.1);
-}
-.timeline-content h3 {
-  margin: 0;
-  font-size: 1.3rem;
-  color: #ccc;
-  transition: color 0.3s ease;
-}
-.timeline-item-vertical.active .timeline-content h3 {
-  color: var(--txt);
-}
-.timeline-right {
-  position: relative;
-  height: 300px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-.timeline-content-panel {
-  position: absolute;
-  text-align: center;
-  max-width: 450px;
-  opacity: 0;
-}
-.timeline-content-panel h2 {
-  font-family: 'Oswald', sans-serif;
-  font-size: 2.5rem;
-  margin-bottom: 20px;
-}
-.timeline-content-panel p {
-  font-size: 1.2rem;
-  line-height: 1.6;
-  color: #333;
-}
-.timeline-cta {
-  margin-top: 30px;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.3s ease-in-out, visibility 0.3s ease-in-out;
-}
-.timeline-cta.visible {
-  opacity: 1;
-  visibility: visible;
-}
-
 /* --- NEW: About Section Styling --- */
 #about {
   display: flex;
@@ -1743,4 +1628,76 @@ input.invalid-input {
 }
 .cta-google:hover {
     background-color: #f5f5f5;
+}
+/* --- NEW: Static Process Section --- */
+#process.container {
+  min-height: auto;
+  padding-top: 80px;
+  padding-bottom: 80px;
+}
+
+.process-static-container {
+  max-width: 1200px; /* Widen the container for a horizontal layout */
+  margin: 0 auto;
+}
+
+.process-header {
+  text-align: center;
+  margin-bottom: 60px; /* More space before the steps */
+}
+
+.process-header .section-title {
+  margin-bottom: 10px;
+}
+
+.process-header .section-subtitle {
+  font-size: 1.2rem;
+  color: #555;
+  margin: 0;
+}
+
+/* Use Flexbox for the horizontal layout */
+.process-static-timeline {
+  display: flex;
+  justify-content: space-between;
+  gap: 30px; /* Space between each step */
+}
+
+.process-static-item {
+  flex: 1; /* Each item will take up equal space */
+  text-align: center; /* Center the content within each item */
+}
+
+.process-static-step {
+  width: 60px; /* Larger icon circle */
+  height: 60px;
+  background-color: var(--accent);
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem; /* Larger icon */
+  margin: 0 auto 20px auto; /* Center the icon horizontally */
+  border: 4px solid #fff;
+  box-shadow: 0 5px 15px rgba(0, 106, 198, 0.2);
+}
+
+.process-static-content h3 {
+  font-family: 'Oswald', sans-serif;
+  text-transform: uppercase;
+  font-size: 1.3rem;
+  margin: 0 0 10px 0;
+}
+
+.process-static-content p {
+  line-height: 1.6;
+  color: #333;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.process-static-cta {
+  text-align: center;
+  margin-top: 60px; /* More space before the final button */
 }

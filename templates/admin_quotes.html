@@ -4,7 +4,7 @@
 {% block content %}
 <div class="admin-header">
     <h1>Quote Management</h1>
-    <a href="{{ url_for('admin_create_quote') }}" class="cta">Create New Quote</a>
+    <a href="{{ url_for('admin_create_quote') }}" class="cta">Create Blank Quote</a>
 </div>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -18,6 +18,40 @@
 {% endwith %}
 
 <div class="admin-section">
+    <h2>New Specialized Quote Requests</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Received</th>
+                <th>Name & Contact</th>
+                <th>Message</th>
+                <th style="width: 150px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for req in requests %}
+            <tr>
+                <td>{{ req.request_date.strftime('%d %b %Y, %H:%M') }}</td>
+                <td>
+                    <strong>{{ req.name }}</strong><br>
+                    <small>{{ req.email }}<br>{{ req.phone }}</small>
+                </td>
+                <td style="white-space: pre-wrap; max-width: 400px;">{{ req.message }}</td>
+                <td>
+                    <a href="{{ url_for('admin_create_quote', request_id=req.id) }}" class="cta" style="background-color: #28a745; border-color: #28a745; padding: 8px 12px; font-size: 0.9rem;">Generate Quote</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" style="text-align: center; padding: 20px;">No new specialized quote requests.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="admin-section">
+    <h2>Existing Quotes</h2>
     <table class="data-table">
         <thead>
             <tr>
@@ -25,6 +59,7 @@
                 <th>Client</th>
                 <th>Date</th>
                 <th>Total</th>
+                <th>Status</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -41,19 +76,14 @@
         </td>
         <td>{{ quote.quote_date.strftime('%d %b %Y') }}</td>
         <td>R{{ "%.2f"|format(quote.total) }}</td>
+        <td><span class="booking-status status-{{ quote.status.lower() }}">{{ quote.status }}</span></td>
         <td class="action-buttons">
             <div class="action-dropdown">
-                <button class="action-dropdown-btn" onclick="toggleDropdown(this)"></button> 
+                <button class="action-dropdown-btn" onclick="toggleDropdown(this)"></button>
                 <div class="action-dropdown-content">
                     <a href="{{ url_for('admin_view_quote', quote_id=quote.id) }}">View</a>
                     <a href="{{ url_for('admin_edit_quote', quote_id=quote.id) }}">Edit</a>
                     <a href="{{ url_for('admin_download_quote_pdf', quote_id=quote.id) }}">Download PDF</a>
-
-                    <form action="{{ url_for('email_quote_to_client', quote_id=quote.id) }}" method="POST">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" style="color: #006ac6;">Send to Client</button>
-                    </form>
-                    
                     <form action="{{ url_for('admin_delete_quote', quote_id=quote.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this quote?');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" style="color: red;">Delete</button>
@@ -64,7 +94,7 @@
     </tr>
     {% else %}
     <tr>
-        <td colspan="5" style="text-align: center; padding: 20px;">No quotes found.</td>
+        <td colspan="6" style="text-align: center; padding: 20px;">No quotes found.</td>
     </tr>
     {% endfor %}
 </tbody>
@@ -73,17 +103,13 @@
 
 <script>
 function toggleDropdown(button) {
-    // Close all other dropdowns
     document.querySelectorAll('.action-dropdown.open').forEach(dropdown => {
         if (dropdown !== button.parentElement) {
             dropdown.classList.remove('open');
         }
     });
-    // Toggle the clicked dropdown
     button.parentElement.classList.toggle('open');
 }
-
-// Close dropdowns if clicking outside
 window.onclick = function(event) {
     if (!event.target.matches('.action-dropdown-btn')) {
         document.querySelectorAll('.action-dropdown.open').forEach(dropdown => {

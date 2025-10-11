@@ -22,7 +22,7 @@
                     <th>Date</th>
                     <th>Total</th>
                     <th style="width: 150px;">Status</th>
-                    <th style="width: 120px;">Actions</th>
+                    <th style="width: 250px;">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -32,7 +32,15 @@
                     <td>{{ quote.quote_date.strftime('%d %b %Y') }}</td>
                     <td>R{{ "%.2f"|format(quote.total) }}</td>
                     <td><span class="booking-status status-{{ quote.status.lower() }}">{{ quote.status }}</span></td>
-                    <td>
+                    <td class="action-buttons">
+                        {% if quote.status == 'Accepted' and not quote.deposit_paid %}
+                            <a href="{{ url_for('pay_for_quote', token=quote.payment_token) }}" class="cta-small" style="background-color: #28a745;">Pay Deposit</a>
+                        {% elif quote.status == 'Draft' %}
+                             <form action="{{ url_for('client_accept_quote', quote_id=quote.id) }}" method="POST" style="margin:0; display: inline-block;">
+                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                 <button type="submit" class="cta-outline-small">Accept Quote</button>
+                             </form>
+                        {% endif %}
                         <a href="{{ url_for('client_download_quote_pdf', quote_id=quote.id) }}" class="cta-outline-small">Download PDF</a>
                     </td>
                 </tr>
@@ -81,7 +89,12 @@
             {% if bookings %}
                 {% for booking in bookings %}
                 <div class="booking-item">
+                    <div class="booking-details">
+                        <span class="booking-date">Requested on: {{ booking.request_date.strftime('%d %b %Y') }}</span>
+                        <span class="booking-service">Service: {{ booking.primary_service }}</span>
+                        <span class="booking-status status-{{ booking.status.lower() }}">{{ booking.status }}</span>
                     </div>
+                 </div>
                 {% endfor %}
             {% else %}
                 <p>You have not requested any quotes or bookings yet.</p>

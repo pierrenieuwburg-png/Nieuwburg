@@ -20,7 +20,7 @@
         <tbody>
             {% for log in logs %}
             <tr>
-                <td>{{ log.timestamp.strftime('%d %b %Y, %H:%M:%S') }}</td>
+                <td>{{ (log.timestamp|to_sast).strftime('%d %b %Y, %H:%M:%S') }}</td>
                 <td>{{ log.activity_type }}</td>
                 <td>{{ log.description }}</td>
                 <td>
