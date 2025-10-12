@@ -194,9 +194,27 @@
             <div id="booking-calculator-content">
                 </div>
 
-            <div id="booking-scheduler-content" class="hidden" style="margin-top: 20px;">
-                <hr>
-                <h3 style="margin-top: 20px;">Select a Date & Time</h3>
+            <div id="booking-summary-container" class="hidden">
+                <div class="booking-summary">
+                     <div class="summary-item">
+                        <span>Estimated Time</span>
+                        <strong id="booking-time-total">0 mins</strong>
+                    </div>
+                    <div class="summary-item total">
+                        <span>Estimated Total</span>
+                        <strong id="booking-price-total">R0.00</strong>
+                    </div>
+                </div>
+                <button class="cta" id="booking-next-step-btn" style="width: 100%; margin-top: 20px;">Next: Confirm Details</button>
+            </div>
+        </div>
+
+        <div id="booking-step-4-confirm" class="hidden">
+            <button class="booking-back-btn cta-outline" data-target-step="3">← Back</button>
+            <h2 style="text-align: center;">Confirm Your Details</h2>
+
+             <div id="booking-scheduler-content" style="margin-top: 20px;">
+                <h3 style="margin-top: 20px; font-size: 1.1rem; text-align: left;">Select a Date & Time</h3>
                 <div style="display: flex; gap: 20px;">
                     <div style="flex: 1;">
                         <label for="booking-date">Choose a date:</label>
@@ -211,9 +229,9 @@
                 </div>
             </div>
 
-            <div id="booking-customer-details" class="hidden" style="margin-top: 20px;">
+            <div id="booking-customer-details" style="margin-top: 20px;">
                 <hr>
-                <h3 style="margin-top: 20px;">Your Contact Details</h3>
+                <h3 style="margin-top: 20px; font-size: 1.1rem; text-align: left;">Your Contact Details</h3>
                 <form id="customer-details-form">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                         <div class="form-group">
@@ -232,20 +250,7 @@
                 </form>
             </div>
 
-            <div id="booking-summary-container" class="hidden">
-                <div class="booking-summary">
-                    <div class="summary-item">
-                        <span>Estimated Time</span>
-                        <strong id="booking-time-total">0 mins</strong>
-                    </div>
-                    <div class="summary-item total">
-                        <span>Estimated Total</span>
-                        <strong id="booking-price-total">R0.00</strong>
-                    </div>
-                </div>
-                <button class="cta" id="booking-next-step-btn" style="width: 100%; margin-top: 20px;">Next: Final Details</button>
-                <button class="cta hidden" id="booking-confirm-btn" style="width: 100%; margin-top: 20px;">Confirm & Book Now</button>
-            </div>
+            <button class="cta" id="booking-confirm-btn" style="width: 100%; margin-top: 20px;">Confirm & Proceed to Payment</button>
         </div>
     </div>
 </div>

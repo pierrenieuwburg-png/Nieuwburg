@@ -833,6 +833,43 @@ async function handleQuoteFormSubmit(e) {
   }
 }
 
+async function initializePaystack(bookingData) {
+    try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        const response = await fetch('/initialize-payment', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify(bookingData)
+        });
+        const paymentData = await response.json();
+
+        if (paymentData.authorization_url) {
+            const handler = PaystackPop.setup({
+                key: 'pk_test_8aeed7ae6e10339f657b2f986288333b5db779a3', // Your public key
+                email: bookingData.email,
+                amount: bookingData.totalPrice * 100,
+                currency: 'ZAR',
+                ref: paymentData.reference,
+                callback: function(response) {
+                    window.location.href = '/payment-callback?reference=' + response.reference;
+                },
+                onClose: function() {
+                    alert('Payment window closed.');
+                }
+            });
+            handler.openIframe();
+        } else {
+            alert('Could not initialize payment. Please try again.');
+        }
+    } catch (error) {
+        console.error('Paystack initialization error:', error);
+        alert('An error occurred setting up payment.');
+    }
+}
+
 async function handleStaffApplicationSubmit(e) {
     e.preventDefault();
     const form = e.target;
@@ -954,6 +991,7 @@ function showBookingStep(stepNumber) {
     document.getElementById('booking-step-1').classList.add('hidden');
     document.getElementById('booking-step-2-address').classList.add('hidden');
     document.getElementById('booking-step-3-details').classList.add('hidden');
+    document.getElementById('booking-step-4-confirm').classList.add('hidden'); // Add this line
 
     if (stepNumber === 1) {
         document.getElementById('booking-step-1').classList.remove('hidden');
@@ -961,6 +999,8 @@ function showBookingStep(stepNumber) {
         document.getElementById('booking-step-2-address').classList.remove('hidden');
     } else if (stepNumber === 3) {
         document.getElementById('booking-step-3-details').classList.remove('hidden');
+    } else if (stepNumber === 4) { // Add this block
+        document.getElementById('booking-step-4-confirm').classList.remove('hidden');
     }
 }
 
@@ -1069,10 +1109,18 @@ function renderStep3_Details() {
 }
 
 function attachCalculationAndSubmissionLogic(category) {
+    // --- Get references to all necessary elements ONCE ---
     const form = document.getElementById('booking-calculator-form');
     const priceTotalEl = document.getElementById('booking-price-total');
     const timeTotalEl = document.getElementById('booking-time-total');
     const hiddenFrequencyInput = document.getElementById('booking-frequency');
+    const nextStepBtn = document.getElementById('booking-next-step-btn');
+    const confirmBtn = document.getElementById('booking-confirm-btn');
+    const dateInput = document.getElementById('booking-date');
+    const timeSelect = document.getElementById('booking-time');
+
+    // This object will hold all our booking data as we build it.
+    let bookingData = {};
 
     let totalPrice = 0;
     let totalTime = 0;
@@ -1084,7 +1132,9 @@ function attachCalculationAndSubmissionLogic(category) {
         const inputs = form.querySelectorAll('input[data-item-type]');
         
         inputs.forEach(input => {
-            const itemId = input.closest('.booking-item-row').dataset.itemId;
+            const row = input.closest('.booking-item-row');
+            if (!row) return; // Defensive check
+            const itemId = row.dataset.itemId;
             const item = category.items.find(i => i.id == itemId);
             if (!item) return;
 
@@ -1103,8 +1153,9 @@ function attachCalculationAndSubmissionLogic(category) {
         timeTotalEl.textContent = `${totalTime} mins`;
     };
     
+    // --- Attach all event listeners for the calculation part ---
     form.addEventListener('change', calculateTotal);
-    calculateTotal();
+    calculateTotal(); // Initial calculation
 
     form.querySelectorAll('.quantity-selector').forEach(selector => {
         const minusBtn = selector.querySelector('.minus');
@@ -1137,20 +1188,34 @@ function attachCalculationAndSubmissionLogic(category) {
     }
     hiddenFrequencyInput.addEventListener('change', calculateTotal);
 
-    // --- SCHEDULER & SUBMISSION LOGIC ---
-    const nextStepBtn = document.getElementById('booking-next-step-btn');
-    const confirmBtn = document.getElementById('booking-confirm-btn');
-    const schedulerContent = document.getElementById('booking-scheduler-content');
-    const customerDetailsContent = document.getElementById('booking-customer-details');
-    const dateInput = document.getElementById('booking-date');
-    const timeSelect = document.getElementById('booking-time');
+    // --- BUTTON AND SCHEDULER LOGIC ---
     dateInput.min = new Date().toISOString().split("T")[0];
 
+    // CORRECTED LOGIC FOR "Next: Confirm Details" button
     nextStepBtn.onclick = () => {
-        schedulerContent.classList.remove('hidden');
-        customerDetailsContent.classList.remove('hidden');
-        nextStepBtn.classList.add('hidden');
-        confirmBtn.classList.remove('hidden');
+        // Step 1: Gather service details from the visible form.
+        const formData = new FormData(form);
+        const services = [];
+        for (let [key, value] of formData.entries()) {
+            const inputElement = form.querySelector(`#${key.replace(/([\[\]])/g, '\\$1')}`);
+            if (key.startsWith('item_') && inputElement && (value > 0 || (inputElement.type === 'checkbox' && inputElement.checked))) {
+                const itemId = key.split('_')[1];
+                const item = category.items.find(i => i.id == itemId);
+                if (item) services.push({ name: item.name, quantity: value });
+            }
+        }
+        
+        // Step 2: Store the data in our persistent object.
+        bookingData = {
+            totalPrice: totalPrice,
+            totalTime: totalTime,
+            services: services,
+            categoryName: category.name,
+            frequency: hiddenFrequencyInput.value
+        };
+        
+        // Step 3: Move to the next step.
+        showBookingStep(4); 
     };
 
     dateInput.onchange = async () => {
@@ -1178,83 +1243,32 @@ function attachCalculationAndSubmissionLogic(category) {
         }
     };
     
+    // LOGIC for "Confirm & Proceed to Payment" button
     confirmBtn.onclick = async () => {
-        // --- Gather all data ---
+        // Step 1: Gather contact details from the current form.
         const customerName = document.getElementById('customer-name').value;
         const customerEmail = document.getElementById('customer-email').value;
         const customerPhone = document.getElementById('customer-phone').value;
         const bookingDate = dateInput.value;
         const bookingTime = timeSelect.value;
         
-        // --- Validation ---
         if (!customerName || !customerEmail || !customerPhone || !bookingDate || !bookingTime || bookingTime.includes('date first')) {
             alert('Please fill in all your details and select a valid date and time.');
             return;
         }
 
-        const formData = new FormData(form);
-        const services = [];
-        for (let [key, value] of formData.entries()) {
-            if (key.startsWith('item_') && (value > 0 || (form.querySelector(`#${key}`).type === 'checkbox' && form.querySelector(`#${key}`).checked))) {
-                const itemId = key.split('_')[1];
-                const item = category.items.find(i => i.id == itemId);
-                services.push({ name: item.name, quantity: value });
-            }
-        }
-
-        const bookingData = {
-            name: customerName,
-            email: customerEmail,
-            phone: customerPhone,
-            address: selectedAddress,
-            date: bookingDate,
-            time: bookingTime,
-            totalPrice: totalPrice,
-            totalTime: totalTime,
-            services: services,
-            categoryName: category.name,
-            frequency: hiddenFrequencyInput.value
-        };
-
-        // --- Initialize Paystack Payment ---
-        try {
-            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            const response = await fetch('/initialize-payment', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken
-                },
-                body: JSON.stringify(bookingData)
-            });
-            const paymentData = await response.json();
-    
-            if (paymentData.authorization_url) {
-                const handler = PaystackPop.setup({
-                    key: 'pk_test_8aeed7ae6e10339f657b2f986288333b5db779a3', // Your public key
-                    email: bookingData.email,
-                    amount: bookingData.totalPrice * 100, // Amount in kobo
-                    currency: 'ZAR',
-                    ref: paymentData.reference,
-                    callback: function(response) {
-                        window.location.href = '/payment-callback?reference=' + response.reference;
-                    },
-                    onClose: function() {
-                        alert('Payment window closed.');
-                    }
-                });
-                handler.openIframe();
-            } else {
-                alert('Could not initialize payment. Please try again.');
-            }
-    
-        } catch (error) {
-            console.error('Booking submission error:', error);
-            alert('An error occurred. Please try again.');
-        }
+        // Step 2: Add the contact details to our existing data object.
+        bookingData.name = customerName;
+        bookingData.email = customerEmail;
+        bookingData.phone = customerPhone;
+        bookingData.address = selectedAddress;
+        bookingData.date = bookingDate;
+        bookingData.time = bookingTime;
+        
+        // Step 3: Proceed to payment with the complete data object.
+        initializePaystack(bookingData);
     };
 }
-
 
 // --- GOOGLE MAPS FUNCTIONALITY ---
 let map;

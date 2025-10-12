@@ -106,7 +106,20 @@ db = SQLAlchemy(app)
 
 def send_async_email(app, msg):
     with app.app_context():
-        mail.send(msg)
+        print("\n--- [EMAIL DEBUG] Attempting to send email in background thread ---")
+        print(f"[EMAIL DEBUG] Mail Server Config: {app.config.get('MAIL_SERVER')}")
+        print(f"[EMAIL DEBUG] Mail Port Config: {app.config.get('MAIL_PORT')}")
+        print(f"[EMAIL DEBUG] Mail Use TLS Config: {app.config.get('MAIL_USE_TLS')}")
+        print(f"[EMAIL DEBUG] Mail Username Config: {app.config.get('MAIL_USERNAME')}")
+        print(f"[EMAIL DEBUG] Recipient(s): {msg.recipients}")
+        try:
+            mail.send(msg)
+            print("--- [EMAIL DEBUG] SUCCESS: mail.send(msg) was executed. ---")
+        except Exception as e:
+            print(f"--- [EMAIL DEBUG] CRITICAL ERROR during mail.send(): {e} ---")
+            import traceback
+            traceback.print_exc()
+        print("--- [EMAIL DEBUG] Email sending process finished. ---\n")
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -175,6 +188,7 @@ class QuoteRequest(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     total_price = db.Column(db.Float)
     service_details = db.Column(db.Text)
+    job = db.relationship('Job', back_populates='quote_request', uselist=False)
 
 class Quote(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -247,9 +261,9 @@ class Job(db.Model):
     status = db.Column(db.String(50), nullable=False, default='Scheduled')
     notes = db.Column(db.Text, nullable=True)
     quote_request_id = db.Column(db.Integer, db.ForeignKey('quote_request.id'), nullable=True)
-    quote_request = db.relationship('QuoteRequest', backref=db.backref('job', uselist=False))
+    quote_request = db.relationship('QuoteRequest', back_populates='job')
     assigned_staff = db.relationship('User', secondary=job_staff_association, lazy='subquery',
-        backref=db.backref('jobs_assigned', lazy=True))
+    backref=db.backref('jobs_assigned', lazy=True))
 
 class StaffApplication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1324,6 +1338,34 @@ def reset_password(token):
         
     return render_template('reset_password.html', form=form)
 
+@app.route('/create-password/<token>', methods=['GET', 'POST'])
+def create_password(token):
+    if current_user.is_authenticated:
+        return redirect(url_for('client_dashboard'))
+    try:
+        email = confirm_token(token, expiration=86400) # Link is valid for 24 hours
+        user = User.query.filter_by(email=email).first_or_404()
+    except:
+        flash('The activation link is invalid or has expired. Please request a new one.', 'error')
+        return redirect(url_for('request_password_reset'))
+    
+    if user.is_confirmed:
+        flash('This account has already been activated. Please log in.', 'info')
+        return redirect(url_for('login'))
+
+    form = ResetPasswordForm() # We can reuse the ResetPasswordForm for this
+    if form.validate_on_submit():
+        user.set_password(form.password.data)
+        user.is_confirmed = True
+        user.confirmed_on = datetime.utcnow()
+        db.session.commit()
+
+        login_user(user)
+        flash('Your account has been activated and you are now logged in!', 'success')
+        return redirect(url_for('client_dashboard'))
+        
+    return render_template('create_password.html', form=form)
+
 @app.route('/change-password', methods=['GET', 'POST'])
 @login_required
 def change_password():
@@ -1500,18 +1542,17 @@ def admin_bookings():
 
     for job in jobs:
         client_name = "N/A"
-        if job.quote_request and job.quote_request.user:
+        if job.quote_request and job.quote_request.user and job.quote_request.user.profile:
             client_name = job.quote_request.user.profile.full_name or job.quote_request.user.email
         
-        title = f"{job.status} - {client_name}"
-
+        title = client_name
+        
         event = {
-            'id': job.id, # Add the job ID here
+            'id': job.id,
             'title': title,
             'start': job.scheduled_date.isoformat(),
             'allDay': not job.start_time,
-            'url': url_for('admin_edit_job', job_id=job.id),
-            'color': status_colors.get(job.status, '#6c757d') # Default to grey
+            'color': status_colors.get(job.status, '#6c757d')
         }
         if job.start_time:
             event['start'] = f"{job.scheduled_date.isoformat()}T{job.start_time.isoformat()}"
@@ -2784,32 +2825,31 @@ def api_availability(date_str):
 
     return jsonify(available_slots)
 
-# app.py
-
+# --- REVISED: Now handles the Full Name correctly ---
 @app.route('/api/create_booking', methods=['POST'])
 def create_booking():
     data = request.json
     try:
         customer_email = data.get('email')
+        customer_name = data.get('name') # <-- Get the name
         
         # Check if user exists, otherwise create a temporary guest user
         user = User.query.filter_by(email=customer_email).first()
         if not user:
-            guest_password = str(uuid.uuid4()) # Generate a secure random password
+            guest_password = str(uuid.uuid4())
             user = User(email=customer_email, role='client')
             user.set_password(guest_password)
             db.session.add(user)
             
             profile = Profile(
                 user=user,
-                full_name=data.get('name'),
+                full_name=customer_name, # <-- Use the name here
                 phone_number=data.get('phone'),
                 address=data.get('address')
             )
             db.session.add(profile)
-            db.session.flush() # Flush to get user ID before committing
+            db.session.flush()
 
-        # Create a new QuoteRequest from the booking data
         new_request = QuoteRequest(
             user_id=user.id,
             primary_service=data.get('categoryName'),
@@ -2866,38 +2906,60 @@ def inject_google_maps_api_key():
 
 @app.route('/initialize-payment', methods=['POST'])
 def initialize_payment():
-    print(f"DEBUG: Using Paystack Secret Key starting with: {os.environ.get('PAYSTACK_SECRET_KEY')[:10]}")
-    data = request.json
-    url = "https://api.paystack.co/transaction/initialize"
-    
-    # Paystack amount is in kobo (the lowest denomination), so multiply by 100
-    amount_in_kobo = int(float(data.get('totalPrice')) * 100)
-
-    payload = {
-        "email": data.get('email'),
-        "amount": amount_in_kobo,
-        "currency": "ZAR",  # <-- ADD THIS LINE
-        "metadata": {
-            "booking_details": data # Store all booking data in metadata
-        }
-    }
-    headers = {
-        "Authorization": f"Bearer {os.environ.get('PAYSTACK_SECRET_KEY')}",
-        "Content-Type": "application/json"
-    }
-
+    print("--- [DEBUG] /initialize-payment endpoint called ---")
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        data = request.json
+        if not data:
+            print("[DEBUG] ERROR: No JSON data received in request.")
+            return jsonify({'error': 'No data provided'}), 400
+        
+        print(f"[DEBUG] Received data: {data}")
+
+        total_price = data.get('totalPrice')
+        email = data.get('email')
+
+        if total_price is None or email is None:
+            print(f"[DEBUG] ERROR: Missing 'totalPrice' or 'email'. Price: {total_price}, Email: {email}")
+            return jsonify({'error': 'Missing required payment information.'}), 400
+
+        amount_in_kobo = int(float(total_price) * 100)
+
+        payload = {
+            "email": email,
+            "amount": amount_in_kobo,
+            "currency": "ZAR",
+            "metadata": {
+                "booking_details": data
+            }
+        }
+        headers = {
+            "Authorization": f"Bearer {os.environ.get('PAYSTACK_SECRET_KEY')}",
+            "Content-Type": "application/json"
+        }
+
+        print("[DEBUG] Sending payload to Paystack...")
+        response = requests.post("https://api.paystack.co/transaction/initialize", headers=headers, json=payload)
+        response.raise_for_status() # This will raise an error for bad responses (4xx or 5xx)
+        
         response_data = response.json()
-        if response_data['status']:
+        if response_data.get('status'):
+            print("[DEBUG] Paystack initialization successful.")
             return jsonify(response_data['data'])
         else:
-            # More detailed error logging
-            print("Paystack Error:", response_data.get('message'))
-            return jsonify({'error': 'Could not initialize payment'}), 400
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+            print("[DEBUG] Paystack returned an error:", response_data.get('message'))
+            return jsonify({'error': 'Could not initialize payment with provider.'}), 400
 
+    except requests.exceptions.HTTPError as http_err:
+        print(f"[DEBUG] HTTP error occurred with Paystack API: {http_err}")
+        print(f"[DEBUG] Paystack response content: {response.text}")
+        return jsonify({'error': f"HTTP error: {http_err}"}), 500
+    except Exception as e:
+        print(f"[DEBUG] A critical error occurred in initialize_payment: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'An internal server error occurred.'}), 500
+
+# --- REVISED: Handles new user registration flow ---
 @app.route('/payment-callback')
 def payment_callback():
     reference = request.args.get('reference')
@@ -2915,42 +2977,45 @@ def payment_callback():
         if verification_data.get('data', {}).get('status') == 'success':
             metadata = verification_data['data']['metadata']
             
-            # --- LOGIC FOR QUOTE DEPOSIT PAYMENTS ---
+            # This part for quote deposits is unchanged and correct.
             if 'quote_id' in metadata:
                 quote = db.session.get(Quote, metadata['quote_id'])
                 if quote:
                     quote.deposit_paid = True
                     quote.status = 'Confirmed'
-                    
-                    # Find the placeholder job created when the quote was accepted
                     job = Job.query.filter(Job.notes.like(f"%Quote #{quote.quote_number}%")).first()
                     if job:
-                        job.status = 'Scheduled' # Update status from 'Pending Deposit'
-                    
+                        job.status = 'Scheduled'
                     db.session.commit()
                     log_activity('Deposit Paid', f"50% deposit paid for Quote {quote.quote_number}.", user_id=quote.user_id)
                     flash('Thank you! Your deposit has been received and your booking is confirmed.', 'success')
-                    
-                    # Log the user in if they just accepted a guest quote
                     if not current_user.is_authenticated:
                         login_user(quote.user)
-
                     return redirect(url_for('client_dashboard'))
 
-            # --- ORIGINAL LOGIC FOR AUTOMATED BOOKINGS ---
+            # THIS IS THE NEW, CORRECT LOGIC FOR NEW BOOKINGS
             elif 'booking_details' in metadata:
                 booking_data = metadata['booking_details']
-                
                 user = User.query.filter_by(email=booking_data.get('email')).first()
-                if not user:
-                    guest_password = str(uuid.uuid4())
-                    user = User(email=booking_data.get('email'), role='client', is_confirmed=True, confirmed_on=datetime.utcnow())
-                    user.set_password(guest_password)
+
+                is_new_user = not user
+                if is_new_user:
+                    # Create the new user now that payment is confirmed
+                    temp_password = str(uuid.uuid4()) # Unusable password
+                    user = User(email=booking_data.get('email'), role='client', is_confirmed=False)
+                    user.set_password(temp_password)
                     db.session.add(user)
-                    profile = Profile(user=user, full_name=booking_data.get('name'), phone_number=booking_data.get('phone'), address=booking_data.get('address'))
+                    
+                    profile = Profile(
+                        user=user,
+                        full_name=booking_data.get('name'), 
+                        phone_number=booking_data.get('phone'), 
+                        address=booking_data.get('address')
+                    )
                     db.session.add(profile)
                     db.session.flush()
 
+                # Create the booking records
                 new_request = QuoteRequest(
                     user_id=user.id,
                     primary_service=booking_data.get('categoryName'),
@@ -2960,40 +3025,237 @@ def payment_callback():
                     status='Confirmed'
                 )
                 db.session.add(new_request)
-                
-                try:
-                    job_date = datetime.strptime(booking_data.get('date'), '%Y-%m-%d').date()
-                    job_time = datetime.strptime(booking_data.get('time'), '%H:%M').time()
-                except (ValueError, TypeError):
-                    job_date = date.today()
-                    job_time = None
+                db.session.flush()
 
                 new_job = Job(
-                    quote_request=new_request,
-                    scheduled_date=job_date,
-                    start_time=job_time,
+                    quote_request_id=new_request.id,
+                    scheduled_date=datetime.strptime(booking_data.get('date'), '%Y-%m-%d').date(),
+                    start_time=datetime.strptime(booking_data.get('time'), '%H:%M').time(),
                     status='Scheduled'
                 )
                 db.session.add(new_job)
-                
                 db.session.commit()
                 
-                # Log in the user if they were a guest
-                if not current_user.is_authenticated:
-                    login_user(user)
+                # --- THIS IS THE UPDATED BLOCK WITH DEBUGGING ---
+                if is_new_user:
+                    print("\n--- [PAYMENT DEBUG] New user detected. Preparing to send activation email. ---")
+                    try:
+                        # Send the new "Welcome & Activate" email
+                        token = generate_confirmation_token(user.email)
+                        set_password_url = url_for('create_password', token=token, _external=True)
+                        logo_url = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
+                        html = render_template('email/welcome_activate.html', set_password_url=set_password_url, logo_url=logo_url)
+                        msg = Message(subject="[Nieuwburg Blitz] Welcome & Activate Your Account",
+                                      sender=app.config['MAIL_USERNAME'],
+                                      recipients=[user.email],
+                                      html=html)
+                        
+                        print("[PAYMENT DEBUG] Email message object created. Preparing thread.")
+                        thr = Thread(target=send_async_email, args=[app, msg])
+                        print("[PAYMENT DEBUG] Thread object created. Starting thread...")
+                        thr.start()
+                        print("[PAYMENT DEBUG] Thread started. The email process should now be running in the background.")
+                        
+                        flash('Booking confirmed! Please check your email to create your password and access your dashboard.', 'success')
+                    except Exception as e:
+                        print(f"--- [PAYMENT DEBUG] CRITICAL ERROR occurred while preparing the email thread: {e} ---")
+                        import traceback
+                        traceback.print_exc()
+                        flash('Booking confirmed, but there was an error sending your activation email. Please contact support.', 'error')
+                else:
+                    flash('Payment successful! Your new booking is confirmed.', 'success')
+                # --- END OF UPDATED BLOCK ---
 
-                flash('Payment successful! Your booking is confirmed.', 'success')
-                return redirect(url_for('client_dashboard'))
+                return redirect(url_for('index'))
         
-        # Fallback if payment verification fails
-        flash('Payment verification failed. Please contact support.', 'error')
-        return redirect(url_for('index'))
+        else:
+            flash('Payment verification failed. Please contact support.', 'error')
+            return redirect(url_for('index'))
             
     except Exception as e:
         db.session.rollback()
         print(f"CRITICAL ERROR in payment_callback: {e}") 
         flash(f'A critical error occurred during payment verification: {str(e)}', 'error')
         return redirect(url_for('index'))
+
+@app.route('/api/jobs/by-date/<date_str>')
+@login_required
+def api_jobs_by_date(date_str):
+    if current_user.role != 'admin':
+        return jsonify({"error": "Permission denied"}), 403
+    
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"error": "Invalid date format"}), 400
+
+    jobs = Job.query.filter_by(scheduled_date=target_date).order_by(Job.start_time).all()
+    
+    jobs_data = []
+    for job in jobs:
+        client_name = "N/A"
+        if job.quote_request and job.quote_request.user and job.quote_request.user.profile:
+            client_name = job.quote_request.user.profile.full_name or job.quote_request.user.email
+
+        jobs_data.append({
+            "id": job.id,
+            "start_time": job.start_time.strftime('%H:%M') if job.start_time else 'All Day',
+            "end_time": job.end_time.strftime('%H:%M') if job.end_time else '',
+            "client_name": client_name,
+            "service": job.quote_request.primary_service if job.quote_request else 'N/A' # Keep it concise
+        })
+        
+    return jsonify(jobs_data)
+
+@app.route('/api/job/details/<int:job_id>')
+@login_required
+def api_job_details(job_id):
+    if current_user.role != 'admin':
+        return jsonify({"error": "Permission denied"}), 403
+        
+    job = db.session.get(Job, job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    all_staff = User.query.filter_by(role='staff').all()
+    
+    client_name = "N/A"
+    address = "N/A"
+    if job.quote_request and job.quote_request.user and job.quote_request.user.profile:
+        client_name = job.quote_request.user.profile.full_name or job.quote_request.user.email
+        address = job.quote_request.user.profile.address
+
+    details = {
+        "id": job.id,
+        "scheduled_date": job.scheduled_date.isoformat(),
+        "start_time": job.start_time.strftime('%H:%M') if job.start_time else "",
+        "notes": job.notes or "",
+        "client_name": client_name,
+        "address": address,
+        "assigned_staff_ids": [s.id for s in job.assigned_staff],
+        "all_staff": [{"id": s.id, "name": s.profile.full_name} for s in all_staff]
+    }
+    return jsonify(details)
+
+@app.route('/api/job/update/<int:job_id>', methods=['POST'])
+@login_required
+def api_update_job(job_id):
+    if current_user.role != 'admin':
+        return jsonify({"error": "Permission denied"}), 403
+        
+    job = db.session.get(Job, job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+        
+    data = request.json
+    
+    try:
+        job.notes = data.get('notes', job.notes)
+        
+        if 'start_time' in data and data['start_time']:
+            job.start_time = datetime.strptime(data['start_time'], '%H:%M').time()
+        else:
+            job.start_time = None
+            
+        if 'assigned_staff_ids' in data:
+            job.assigned_staff.clear()
+            for staff_id in data['assigned_staff_ids']:
+                staff = db.session.get(User, staff_id)
+                if staff:
+                    job.assigned_staff.append(staff)
+        
+        db.session.commit()
+        log_activity('Job Updated via API', f"Admin '{current_user.email}' updated job ID {job.id} through the calendar modal.", user_id=current_user.id)
+        return jsonify({"status": "ok", "message": "Job updated successfully."})
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/clients/search')
+@login_required
+def api_search_clients():
+    if current_user.role != 'admin':
+        return jsonify({"error": "Permission denied"}), 403
+    
+    query = request.args.get('q', '')
+    if len(query) < 2:
+        return jsonify([])
+
+    clients = User.query.join(Profile).filter(
+        User.role == 'client',
+        Profile.full_name.ilike(f'%{query}%')
+    ).limit(10).all()
+    
+    client_data = [
+        {"id": c.id, "name": c.profile.full_name, "email": c.email, "address": c.profile.address} 
+        for c in clients
+    ]
+    return jsonify(client_data)
+
+
+@app.route('/api/job/create', methods=['POST'])
+@login_required
+def api_create_job():
+    if current_user.role != 'admin':
+        return jsonify({"error": "Permission denied"}), 403
+    
+    data = request.json
+    client_name = data.get('client_name')
+    create_new_client = data.get('create_new_client', False)
+    user_id = None
+
+    # --- Client Handling ---
+    user = User.query.join(Profile).filter(Profile.full_name == client_name).first()
+    if user:
+        user_id = user.id
+    elif create_new_client:
+        # Create a new user and profile
+        temp_email = f"temp_{str(uuid.uuid4())[:8]}@nieuwburg.co.za"
+        new_user = User(email=temp_email, role='client', is_confirmed=True)
+        new_user.set_password(str(uuid.uuid4())) # Set a random, secure password
+        
+        new_profile = Profile(
+            user=new_user,
+            full_name=client_name,
+            phone_number=data.get('phone'),
+            address=data.get('address')
+        )
+        db.session.add(new_user)
+        db.session.add(new_profile)
+        db.session.flush()
+        user_id = new_user.id
+        log_activity('Client Auto-Created', f"New client '{client_name}' created from manual job entry.", user_id=current_user.id)
+    else:
+        return jsonify({"status": "error", "message": f"Client '{client_name}' not found."}), 400
+
+    # --- Job and QuoteRequest Creation ---
+    try:
+        new_quote_request = QuoteRequest(
+            user_id=user_id,
+            primary_service=data.get('service'), # FIX: Use the 'service' field from the form
+            status='Scheduled'
+        )
+        db.session.add(new_quote_request)
+        db.session.flush()
+
+        new_job = Job(
+            quote_request_id=new_quote_request.id,
+            scheduled_date=datetime.strptime(data.get('scheduled_date'), '%Y-%m-%d').date(),
+            notes=data.get('notes') # FIX: The detailed notes now correctly go here
+        )
+        if 'start_time' in data and data['start_time']:
+            new_job.start_time = datetime.strptime(data['start_time'], '%H:%M').time()
+        
+        db.session.add(new_job)
+        db.session.commit()
+        
+        log_activity('Job Manual Create', f"Admin '{current_user.email}' created a new job for {client_name}.", user_id=current_user.id)
+        return jsonify({"status": "ok", "message": "Job created successfully."})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     with app.app_context():

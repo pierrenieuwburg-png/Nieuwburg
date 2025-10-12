@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% block banner %}
 <div class="team-banner">
+  
+  {# NEW: Flash messages will now appear here on the homepage #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-messages-container" style="position: absolute; top: 120px; left: 50%; transform: translateX(-50%); width: 80%; max-width: 900px; z-index: 10;">
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
   <div class="banner-overlay">
     <h1>Blitz Cleaning Services for <span id="typed-text"></span></h1>
   </div>

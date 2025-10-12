@@ -24,7 +24,7 @@
 
 <div class="admin-section">
     <h2>Scheduled & In-Progress Jobs</h2>
-    <table class="data-table">
+    <table class="data-table" id="jobs-table">
         <thead>
             <tr>
                 <th>Date</th>
@@ -39,7 +39,13 @@
             {% for job in current_jobs %}
             <tr id="job-row-{{ job.id }}">
                 <td>{{ job.scheduled_date.strftime('%d %b %Y') }}</td>
-                <td>{{ job.quote_request.user.profile.full_name or job.quote_request.user.email }}</td>
+                <td>
+                    {% if job.quote_request and job.quote_request.user %}
+                    {{ job.quote_request.user.profile.full_name or job.quote_request.user.email }}
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </td>
                 <td>{{ job.quote_request.primary_service }}</td>
                 <td>
                     <span id="status-badge-{{ job.id }}" class="booking-status status-{{ job.status.lower() }}">{{ job.status }}</span>
@@ -112,6 +118,111 @@
     </table>
 </div>
 
+<div id="calendar-modal" class="modal-overlay simple-modal" style="--modal-bg: #212121; --text-color: #fff;">
+    <div class="modal-content" id="modal-content-wrapper">
+        </div>
+</div>
+
+<style>
+    /* Modal Styling */
+    #calendar-modal {
+        background: rgba(0,0,0,0.8);
+        z-index: 2000;
+    }
+    #calendar-modal .modal-content {
+        background-color: var(--modal-bg);
+        color: var(--text-color);
+        border-radius: 16px;
+        max-width: 500px;
+        width: 95%;
+        padding: 0;
+        overflow: hidden;
+        position: relative;
+    }
+    .modal-view {
+        padding: 20px 25px 30px;
+        transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+    }
+    .modal-view.hidden {
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        transform: translateX(100%);
+        opacity: 0;
+        pointer-events: none;
+    }
+    .modal-view.slide-out {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+
+    /* Day View */
+    .day-view-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 25px;
+    }
+    .day-view-header h2 {
+        margin: 0; font-size: 1.8rem;
+    }
+    .day-view-header .modal-close {
+        position: static; font-size: 2rem;
+    }
+    .job-item-row {
+        display: flex;
+        gap: 15px;
+        cursor: pointer;
+        padding: 12px 0;
+        border-bottom: 1px solid #444;
+    }
+    .job-item-row:last-child { border-bottom: none; }
+    .job-item-time { font-weight: 500; }
+    .job-item-details h4 { margin: 0 0 4px; font-size: 1rem; }
+    .job-item-details p { margin: 0; color: #ccc; font-size: 0.9rem; }
+
+    /* Job Detail/Add View */
+    .job-detail-header {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+    .job-detail-header .back-btn {
+        font-size: 1.5rem; background: none; border: none; color: #fff; cursor: pointer;
+    }
+    .job-detail-header h3 { margin: 0; font-size: 1.5rem; }
+    .job-detail-form .form-group, .add-job-form .form-group { margin-bottom: 15px; }
+    .job-detail-form label, .add-job-form label { font-weight: bold; color: #aaa; font-size: 0.8rem; display: block; margin-bottom: 5px;}
+    .job-detail-form input, .job-detail-form textarea, .job-detail-form select,
+    .add-job-form input, .add-job-form textarea, .add-job-form select {
+        background: #333;
+        border: 1px solid #555;
+        color: #fff;
+        width: 100%;
+        padding: 8px;
+        border-radius: 4px;
+        box-sizing: border-box;
+    }
+    .job-detail-form select[multiple] { height: 120px; }
+    .job-detail-actions, .add-job-actions { text-align: right; margin-top: 20px;}
+
+    /* Add Job Button */
+    .add-job-fab {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        width: 50px;
+        height: 50px;
+        background-color: var(--accent);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        font-size: 24px;
+        cursor: pointer;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+</style>
+
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.13/index.global.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -127,11 +238,298 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         events: eventsData,
         height: 'auto',
-        dayMaxEvents: true
+        dayMaxEvents: true,
+        dateClick: function(info) {
+            // This is for clicking on a day cell
+            openDayModal(info.dateStr);
+        },
+        eventClick: function(info) {
+            // This is for clicking an existing event
+            info.jsEvent.preventDefault(); // Prevent the default link behavior
+            openJobDetailModal(info.event.id, info.event.startStr.substring(0, 10));
+        }
     });
     calendar.render();
 
-    // --- AJAX Status Update Logic ---
+    // --- Modal Elements ---
+    const modal = document.getElementById('calendar-modal');
+    const modalWrapper = document.getElementById('modal-content-wrapper');
+
+    // --- NEW: Open Day Modal Function ---
+    async function openDayModal(dateStr) {
+        modal.classList.add('visible');
+        modalWrapper.innerHTML = '<p>Loading jobs...</p>'; // Loading state
+        
+        try {
+            const response = await fetch(`/api/jobs/by-date/${dateStr}`);
+            const jobs = await response.json();
+
+            const date = new Date(dateStr + 'T00:00:00'); // Ensure correct timezone parsing
+            const formattedDate = date.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+
+            let dayViewHtml = `
+                <div class="modal-view" id="day-view">
+                    <div class="day-view-header">
+                        <h2>${formattedDate}</h2>
+                        <button class="modal-close" id="close-day-modal">&times;</button>
+                    </div>
+                    <div class="jobs-list">
+            `;
+
+            if (jobs.length > 0) {
+                jobs.forEach(job => {
+                    dayViewHtml += `
+                        <div class="job-item-row" data-job-id="${job.id}">
+                            <div class="job-item-time">${job.start_time} - ${job.end_time}</div>
+                            <div class="job-item-details">
+                                <h4>${job.client_name}</h4>
+                            </div>
+                        </div>
+                    `;
+                });
+            } else {
+                dayViewHtml += '<p>No jobs scheduled for this day.</p>';
+            }
+
+            dayViewHtml += `
+                    </div>
+                    <button class="add-job-fab" data-date="${dateStr}">+</button>
+                </div>
+            `;
+            modalWrapper.innerHTML = dayViewHtml;
+            
+            // Attach listeners
+            modalWrapper.querySelector('#close-day-modal').addEventListener('click', closeModal);
+            modalWrapper.querySelectorAll('.job-item-row').forEach(row => {
+                row.addEventListener('click', () => openJobDetailModal(row.dataset.jobId, dateStr));
+            });
+            modalWrapper.querySelector('.add-job-fab').addEventListener('click', (e) => openAddJobModal(e.target.dataset.date));
+
+        } catch (error) {
+            console.error("Error fetching jobs for day:", error);
+            modalWrapper.innerHTML = '<p style="color:red;">Could not load jobs.</p>';
+        }
+    }
+    
+    // --- NEW: Open Job Detail Modal Function ---
+    async function openJobDetailModal(jobId, dateStr) {
+        try {
+            const response = await fetch(`/api/job/details/${jobId}`);
+            const job = await response.json();
+
+            let staffOptions = job.all_staff.map(staff => 
+                `<option value="${staff.id}" ${job.assigned_staff_ids.includes(staff.id) ? 'selected' : ''}>${staff.name}</option>`
+            ).join('');
+
+            const jobDetailHtml = `
+                <div class="modal-view" id="job-detail-view">
+                    <div class="job-detail-header">
+                        <button class="back-btn" data-date="${dateStr}">&larr;</button>
+                        <h3>${job.client_name}</h3>
+                    </div>
+                    <form id="job-detail-form" class="job-detail-form">
+                        <div class="form-group">
+                            <label>Start Time</label>
+                            <input type="time" name="start_time" value="${job.start_time}">
+                        </div>
+                        <div class="form-group">
+                            <label>Assigned Staff</label>
+                            <select name="assigned_staff_ids" multiple>${staffOptions}</select>
+                        </div>
+                        <div class="form-group">
+                            <label>Notes</label>
+                            <textarea name="notes" rows="4">${job.notes}</textarea>
+                        </div>
+                        <div class="job-detail-actions">
+                            <button type="submit" class="cta">Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            
+            // Animate transition
+            const dayView = modalWrapper.querySelector('#day-view');
+            if (dayView) {
+                dayView.classList.add('slide-out');
+            }
+            modalWrapper.insertAdjacentHTML('beforeend', jobDetailHtml);
+
+            // Attach listeners
+            modalWrapper.querySelector('.back-btn').addEventListener('click', (e) => {
+                const jobView = modalWrapper.querySelector('#job-detail-view');
+                if(jobView) jobView.remove();
+                if(dayView) {
+                    dayView.classList.remove('slide-out');
+                } else {
+                    openDayModal(e.target.dataset.date);
+                }
+            });
+            
+            modalWrapper.querySelector('#job-detail-form').addEventListener('submit', (e) => handleJobUpdate(e, job.id));
+
+        } catch (error) {
+            console.error("Error fetching job details:", error);
+            alert("Could not load job details.");
+        }
+    }
+
+    // --- NEW: Open Add Job Modal ---
+    function openAddJobModal(dateStr) {
+        const addJobHtml = `
+            <div class="modal-view" id="add-job-view">
+                <div class="job-detail-header">
+                    <button class="back-btn" data-date="${dateStr}">&larr;</button>
+                    <h3>Add New Job</h3>
+                </div>
+                <form id="add-job-form" class="add-job-form">
+                     <div class="form-group">
+                        <label for="client-name-input">Client Name</label>
+                        <input type="text" id="client-name-input" name="client_name" list="client-datalist" autocomplete="off" required>
+                        <datalist id="client-datalist"></datalist>
+                    </div>
+                    <div id="new-client-fields" style="display: none;">
+                         <div class="form-group">
+                            <label for="new-client-phone">Phone</label>
+                            <input type="tel" id="new-client-phone" name="phone">
+                        </div>
+                        <div class="form-group">
+                            <label for="new-client-address">Address</label>
+                            <textarea id="new-client-address" name="address" rows="2"></textarea>
+                        </div>
+                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="create-new-client-checkbox" name="create_new_client" value="true">
+                            <label for="create-new-client-checkbox" style="margin-bottom: 0;">Create new client from this information</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="service-description">Service Description</label>
+                        <input type="text" id="service-description" name="service" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="start-time-input">Start Time</label>
+                        <input type="time" id="start-time-input" name="start_time">
+                    </div>
+                    <div class="form-group">
+                        <label for="notes-input">Notes</label>
+                        <textarea id="notes-input" name="notes" rows="3"></textarea>
+                    </div>
+                    <div class="add-job-actions">
+                        <button type="submit" class="cta">Create Job</button>
+                    </div>
+                </form>
+            </div>
+        `;
+
+        const dayView = modalWrapper.querySelector('#day-view');
+        if (dayView) dayView.classList.add('slide-out');
+        modalWrapper.insertAdjacentHTML('beforeend', addJobHtml);
+
+        const clientInput = modalWrapper.querySelector('#client-name-input');
+        const datalist = modalWrapper.querySelector('#client-datalist');
+        const newClientFields = modalWrapper.querySelector('#new-client-fields');
+        let searchTimeout;
+
+        clientInput.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(async () => {
+                const query = clientInput.value;
+                if (query.length < 2) {
+                    datalist.innerHTML = '';
+                    newClientFields.style.display = 'none';
+                    return;
+                }
+                const response = await fetch(`/api/clients/search?q=${query}`);
+                const clients = await response.json();
+                datalist.innerHTML = clients.map(c => `<option value="${c.name}"></option>`).join('');
+
+                const exactMatch = clients.some(c => c.name.toLowerCase() === query.toLowerCase());
+                newClientFields.style.display = exactMatch ? 'none' : 'block';
+
+            }, 300);
+        });
+
+        modalWrapper.querySelector('.back-btn').addEventListener('click', (e) => {
+            openDayModal(e.target.dataset.date);
+        });
+
+        modalWrapper.querySelector('#add-job-form').addEventListener('submit', (e) => handleJobCreate(e, dateStr));
+    }
+
+    // --- NEW: Handle Job Create Submission ---
+    async function handleJobCreate(e, dateStr) {
+        e.preventDefault();
+        const form = e.target;
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        data.scheduled_date = dateStr; // Add the date from the modal context
+        
+        try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            const response = await fetch('/api/job/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            if (result.status === 'ok') {
+                closeModal();
+                calendar.refetchEvents();
+                location.reload(); // Simple refresh for now to update tables
+            } else {
+                alert('Error: ' + result.message);
+            }
+        } catch (error) {
+            console.error("Error creating job:", error);
+            alert("An unexpected error occurred while creating the job.");
+        }
+    }
+
+
+    // --- NEW: Handle Job Update Submission ---
+    async function handleJobUpdate(e, jobId) {
+        e.preventDefault();
+        const form = e.target;
+        const formData = new FormData(form);
+        const assignedStaffIds = Array.from(form.querySelector('select[name="assigned_staff_ids"]').selectedOptions).map(opt => opt.value);
+
+        const data = {
+            notes: formData.get('notes'),
+            start_time: formData.get('start_time'),
+            assigned_staff_ids: assignedStaffIds
+        };
+        
+        try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            const response = await fetch(`/api/job/update/${jobId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            if (result.status === 'ok') {
+                closeModal();
+                calendar.refetchEvents(); // Refresh calendar to show changes
+                location.reload(); // Simple refresh for now to update tables
+            } else {
+                alert('Error: ' + result.message);
+            }
+        } catch (error) {
+            console.error("Error updating job:", error);
+            alert("An unexpected error occurred.");
+        }
+    }
+
+    function closeModal() {
+        modal.classList.remove('visible');
+        modalWrapper.innerHTML = '';
+    }
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+
+    // --- AJAX Status Update Logic (from previous step) ---
     const statusDropdowns = document.querySelectorAll('.status-update-dropdown');
     const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
     const statusColors = {
