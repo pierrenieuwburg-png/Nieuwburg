@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}About Us - Nieuwburg Blitz{% endblock %}
+
+{% block content %}
+<section class="container" style="padding-top: 60px; padding-bottom: 80px; max-width: 800px;">
+    <div style="margin-bottom: 30px;">
+        <a href="{{ url_for('main.index') }}" style="color: var(--text-light); text-decoration: none; font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 15px;">‹ Back to Home</a>
+        <h1 class="section-title" style="text-align: left; margin-bottom: 10px;">Our Story</h1>
+        <p class="section-subtitle" style="text-align: left; margin: 0; max-width: 100%;">More than just a cleaning service, we're a team dedicated to bringing peace of mind and order to Cape Town's homes and businesses.</p>
+    </div>
+
+    <div style="line-height: 1.8;">
+        <h3>25 Years of Trusted Service</h3>
+        <p>Founded on the principle of providing reliable, high-quality service, Nieuwburg has grown from a small team into one of the city's most respected cleaning and placement agencies. We believe that a clean environment is the foundation for a productive and peaceful life, and we bring that philosophy to every job, big or small.</p>
+
+        <h3>Our Mission</h3>
+        <p>Our mission is simple: to provide the help you need, without the hassle. This means supervised, fully-equipped teams who arrive on time, respect your space, and deliver a consistent, high-quality clean every single time. It's not just a clean—it's the Nieuwburg standard.</p>
+    </div>
+</section>
+{% endblock %}

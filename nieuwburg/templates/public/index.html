@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero-section">
+    <h1 class="hero-title">The Help You Need,<br>Without The Hassle.</h1>
+    <p class="hero-subtitle">Cape Town's trusted, supervised, and fully-equipped cleaning teams, ready when you are.</p>
+    
+    <div class="services-grid">
+        <a href="#" class="service-item service-item-book-button">
+            <div class="service-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>
+            <span>Indoor Cleaning</span>
+        </a>
+        <a href="#" class="service-item service-item-book-button">
+             <div class="service-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg></div>
+            <span>Deep Cleaning</span>
+        </a>
+        <a href="#" class="service-item service-item-book-button">
+            <div class="service-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg></div>
+            <span>Move In/Out Cleaning</span>
+        </a>
+        <a href="#" class="service-item service-item-book-button">
+            <div class="service-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 0 2l-.15.08a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l-.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1 0-2l.15-.08a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></div>
+            <span>Office Cleaning</span>
+        </a>
+        <a href="#" class="service-item service-item-book-button">
+            <div class="service-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10c0-4.42-2.87-8.17-7-9.47L12 2Z"/><path d="M15 15a3 3 0 1 0-6 0"/><path d="M12 2v10"/></svg></div>
+            <span>Post-Construction cleaning</span>
+        </a>
+        <a href="#" class="service-item service-item-book-button">
+            <div class="service-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 21h4c4.47-2.27 7.5-6.83 7-11.5-.56-5.2-4.9-9-10-9S2.56 3.3 2 8.5C1.5 14.17 4.53 18.73 9 21h1Z"/><path d="M12 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/><path d="M12 12v3"/></svg></div>
+            <span>Exterior Cleaning</span>
+        </a>
+    </div>
+    <div class="hero-actions" style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
+        <button class="cta cta-large" id="hero-book-btn">Book a Service</button>
+        <a href="#" id="hero-join-team-btn" style="color: var(--text-light); text-decoration: none; font-weight: 500; font-size: 0.9rem;">Would you like to work with us? Click here.</a>
+    </div>
+</section>
+
+<section class="how-it-works-section">
+    <div class="container">
+        <div class="section-header">
+            <h2 class="section-title">This Isn't Just a Clean. It's The Standard.</h2>
+            <p class="section-subtitle">For 25 years, we've treated every space like our own. Here’s how we bring our trusted legacy to your doorstep.</p>
+        </div>
+        <div class="how-it-works-grid">
+            <div class="step-item">
+                <div class="step-number">1</div>
+                <h3 class="step-title">You Schedule, We Prepare</h3>
+                <p class="step-description">Tell us what you need. Whether it’s a routine tidy or a deep-set rescue mission, we tailor a plan and dispatch a fully-equipped, supervised team. No shortcuts, no gimmicks.</p>
+            </div>
+            <div class="step-item">
+                <div class="step-number">2</div>
+                <h3 class="step-title">The Blitz Team Arrives</h3>
+                <p class="step-description">Our professionals show up on time with the experience and elbow grease to handle real messes. We bring everything needed, respecting your home and community as we work.</p>
+            </div>
+            <div class="step-item">
+                <div class="step-number">3</div>
+                <h3 class="step-title">You Enjoy the Peace of Mind</h3>
+                <p class="step-description">We work efficiently and discreetly, transforming your space so you can get back to what matters. It’s more than a clean space; it’s your sanctuary, restored.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="why-choose-us-section">
+    <div class="container why-choose-us-container">
+        <div class="why-choose-us-image">
+            <img src="https://placehold.co/600x450/002244/FFFFFF?text=Our+Blitz+Team" alt="Nieuwburg Blitz Cleaning Team">
+        </div>
+        <div class="why-choose-us-content">
+            <h2 class="section-title">More Than Just a Clean. <br>It's a Standard.</h2>
+            <p class="section-subtitle">We're different. Here’s why it matters to you.</p>
+            <ul class="why-choose-us-list">
+                <li>
+                    <div class="list-icon">✓</div>
+                    <div>
+                        <strong>Supervised Teams, Guaranteed Quality:</strong> Unlike solo cleaners, every job is overseen by a supervisor to ensure our high standards are met, every time.
+                    </div>
+                </li>
+                <li>
+                    <div class="list-icon">✓</div>
+                    <div>
+                        <strong>Fully Equipped, Zero Hassle:</strong> We bring everything. From specialized equipment to eco-friendly products, you don’t need to provide a thing.
+                    </div>
+                </li>
+                <li>
+                    <div class="list-icon">✓</div>
+                    <div>
+                        <strong>Efficient & Discreet:</strong> Our team approach means we're in and out faster, minimizing disruption to your home or business.
+                    </div>
+                </li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<section class="testimonials-section">
+    <div class="container">
+        <div class="section-header">
+            <h2 class="section-title">Trusted by Homeowners Across Cape Town</h2>
+        </div>
+
+        <div class="testimonial-slider-container">
+            <div class="testimonial-slider">
+                <div class="testimonial-card active">
+                    <blockquote>
+                        "The end-of-tenancy clean was impeccable. The team was efficient, professional, and the agency was thrilled with the result. We got our full deposit back without any issues. Highly recommended!"
+                    </blockquote>
+                    <cite>
+                        <strong>Sarah L.</strong>, Northern Suburbs
+                    </cite>
+                </div>
+                <div class="testimonial-card">
+                    <blockquote>
+                        "Nieuwburg Blitz transformed our office space. Their team is discreet, thorough, and always professional. Coming into a spotless office on a Monday morning has genuinely boosted team morale."
+                    </blockquote>
+                    <cite>
+                        <strong>David C.</strong>, Century City
+                    </cite>
+                </div>
+                <div class="testimonial-card">
+                    <blockquote>
+                        "After our home renovations, the dust was everywhere. We called them for a post-construction clean and were amazed. They handled everything. It was like the mess was never there. Worth every cent."
+                    </blockquote>
+                    <cite>
+                        <strong>Amina K.</strong>, Constantia
+                    </cite>
+                </div>
+            </div>
+            
+            <div class="testimonial-dots">
+                <span class="dot active" data-index="0"></span>
+                <span class="dot" data-index="1"></span>
+                <span class="dot" data-index="2"></span>
+            </div>
+        </div>
+    </div>
+</section>
+<section class="referral-section">
+    <div class="container referral-container">
+        <div class="referral-content">
+            <h2 class="section-title">Share the Sparkle, Get Rewarded.</h2>
+            <p class="section-subtitle">Love our service? Share your unique referral code with friends and family. You'll earn credits for every new person who books with your code, and they'll get a discount on their first clean. It's our way of saying thanks for being part of the Nieuwburg community.</p>
+            <div class="referral-box">
+                <input type="text" value="YOUR-UNIQUE-CODE" readonly>
+                <button class="cta">Copy & Share</button>
+            </div>
+        </div>
+    </div>
+</section>
+<section class="placements-section">
+    <div class="container">
+        <div class="section-header">
+            <h2 class="section-title">Find The Best Full-Time Help</h2>
+            <p class="section-subtitle">Reliable, permanent home help—now more personal than ever.</p>
+        </div>
+        <div class="placements-grid">
+            <div class="placement-card">
+                <div class="placement-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9Z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                </div>
+                <h3>Full-Time Housekeeper</h3>
+                <p>A dedicated professional to manage your home's cleanliness and order.</p>
+                <a href="{{ url_for('main.housekeeper_placement') }}" class="cta-outline">Learn More</a>
+            </div>
+            <div class="placement-card">
+                <div class="placement-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a4.5 4.5 0 0 0-4.5 4.5c0 1.33.62 2.5 1.53 3.22"/><path d="M12 1a4.5 4.5 0 0 1 4.5 4.5c0 1.33-.62 2.5-1.53 3.22"/><path d="M5 10a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1Z"/><path d="M12 15v7"/><path d="M12 15a4 4 0 0 0-4 4h8a4 4 0 0 0-4-4Z"/></svg>
+                </div>
+                <h3>Full-Time Nanny</h3>
+                <p>Trustworthy and caring support for your children and family's needs.</p>
+                <a href="{{ url_for('main.nanny_placement') }}" class="cta-outline">Learn More</a>
+            </div>
+            <div class="placement-card">
+                <div class="placement-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11.37a4 4 0 1 0 0-2.74"/><path d="M12 3a4 4 0 0 0-4 4v0a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4v0a4 4 0 0 0-4-4Z"/><path d="M12 11v10"/><path d="M6 21h12"/></svg>
+                </div>
+                <h3>Full-Time Carer</h3>
+                <p>Compassionate and skilled assistance for elderly or special-needs family members.</p>
+                <a href="{{ url_for('main.carer_placement') }}" class="cta-outline">Learn More</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="client-hub-section">
+    <div class="container client-hub-container">
+        <div class="client-hub-content">
+            <h2 class="section-title">Manage Everything, <br>All In One Place.</h2>
+            <p class="section-subtitle">Our upcoming client hub gives you complete control. Reschedule bookings, manage payments, and view your service history with a click.</p>
+            <a href="{{ url_for('main.blitz_dock') }}" class="cta">Explore The Blitz Dock</a>
+        </div>
+        <div class="client-hub-image">
+            <img src="https://placehold.co/600x450/e5e7eb/FFFFFF?text=Client+Hub+Mockup" alt="Client Hub dashboard on a device">
+        </div>
+    </div>
+</section>
+
+<section class="blog-section">
+    <div class="container">
+        <div class="section-header">
+            <a href="{{ url_for('main.blog') }}" style="text-decoration: none;">
+                <h2 class="section-title">From Our Blog</h2>
+            </a>
+            <p class="section-subtitle">Tips, tricks, and insights to keep your space sparkling.</p>
+        </div>
+        
+        <div class="blog-grid" id="home-blog-grid">
+            </div>
+
+        <div style="text-align: center; margin-top: 40px;">
+             <a href="{{ url_for('main.blog') }}" class="cta-outline">View All Posts</a>
+        </div>
+    </div>
+</section>
+
+<section class="final-cta-section">
+    <div class="container">
+        <h2>Ready for a Spotless Space?</h2>
+        <p>Get an instant estimate and book your service in under 60 seconds.</p>
+        <button class="cta cta-large cta-light" id="final-cta-btn">Book Your Blitz Clean</button>
+    </div>
+</section>
+{% endblock %}
