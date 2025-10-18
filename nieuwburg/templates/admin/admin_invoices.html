@@ -44,7 +44,7 @@
                             <a href="{{ url_for('admin.download_invoice_pdf', invoice_id=invoice.id) }}">Download PDF</a>
                             <form action="{{ url_for('admin.delete_invoice', invoice_id=invoice.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this invoice?');">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" style="color: red;">Delete</button>
+                                <button type="submit" class="delete-action">Delete</button>
                             </form>
                         </div>
                     </div>
@@ -52,7 +52,7 @@
             </tr>
             {% else %}
             <tr>
-                <td colspan="5" style="text-align: center; padding: 20px;">No invoices found.</td>
+                <td colspan="5" style="text-align: center; padding: 20px;" class="no-results-row">No invoices found.</td>
             </tr>
             {% endfor %}
         </tbody>

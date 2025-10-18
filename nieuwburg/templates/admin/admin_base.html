@@ -11,42 +11,172 @@
 </head>
 <body class="admin-body">
   <div class="admin-layout">
-    <aside class="admin-sidebar">
-      <div class="admin-brand">
+     <aside class="admin-sidebar">
+       {# ... Sidebar content remains the same ... #}
+       <div class="admin-brand">
         <img src="{{ url_for('static', filename='img/LogoBlackWithTitle.png') }}" alt="Nieuwburg Blitz Logo">
         <span>Admin Panel</span>
       </div>
-      <nav class="admin-nav">
-        <a href="{{ url_for('admin.dashboard') }}" class="admin-nav-link"><i class="fa-solid fa-chart-line fa-fw"></i>Dashboard</a>
-        <a href="{{ url_for('admin.admin_bookings') }}" class="admin-nav-link"><i class="fa-solid fa-calendar-check fa-fw"></i>Bookings</a>
-        
+      <nav class="admin-nav" id="admin-nav">
+        {# --- ADDED DYNAMIC CLASS TO ALL LINKS --- #}
+        <a href="{{ url_for('admin.dashboard') }}" class="admin-nav-link dynamic-nav-link" data-target="{{ url_for('admin.dashboard') }}"><i class="fa-solid fa-chart-line fa-fw"></i>Dashboard</a>
+        <a href="{{ url_for('admin.admin_bookings') }}" class="admin-nav-link dynamic-nav-link" data-target="{{ url_for('admin.admin_bookings') }}"><i class="fa-solid fa-calendar-check fa-fw"></i>Bookings</a>
         <hr class="nav-divider">
-
-        <a href="{{ url_for('admin.clients') }}" class="admin-nav-link"><i class="fa-solid fa-users fa-fw"></i>Clients</a>
-        <a href="{{ url_for('admin.staff') }}" class="admin-nav-link"><i class="fa-solid fa-user-tie fa-fw"></i>Staff</a>
-        <a href="{{ url_for('admin.admin_applications') }}" class="admin-nav-link"><i class="fa-solid fa-user-plus fa-fw"></i>Blitz Applications</a>
-
+        <a href="{{ url_for('admin.clients') }}" class="admin-nav-link dynamic-nav-link" data-target="{{ url_for('admin.clients') }}"><i class="fa-solid fa-users fa-fw"></i>Clients</a>
+        <a href="{{ url_for('admin.staff') }}" class="admin-nav-link dynamic-nav-link" data-target="{{ url_for('admin.staff') }}"><i class="fa-solid fa-user-tie fa-fw"></i>Staff</a>
+        <a href="{{ url_for('admin.admin_applications') }}" class="admin-nav-link dynamic-nav-link" data-target="{{ url_for('admin.admin_applications') }}"><i class="fa-solid fa-user-plus fa-fw"></i>Blitz Applications</a>
         <hr class="nav-divider">
-
-        <a href="{{ url_for('admin.admin_quotes') }}" class="admin-nav-link"><i class="fa-solid fa-file-invoice fa-fw"></i>Quotes</a>
-        <a href="{{ url_for('admin.admin_invoices') }}" class="admin-nav-link"><i class="fa-solid fa-file-invoice-dollar fa-fw"></i>Invoices</a>
-        
+        <a href="{{ url_for('admin.admin_quotes') }}" class="admin-nav-link dynamic-nav-link" data-target="{{ url_for('admin.admin_quotes') }}"><i class="fa-solid fa-file-invoice fa-fw"></i>Quotes</a>
+        <a href="{{ url_for('admin.admin_invoices') }}" class="admin-nav-link dynamic-nav-link" data-target="{{ url_for('admin.admin_invoices') }}"><i class="fa-solid fa-file-invoice-dollar fa-fw"></i>Invoices</a>
         <hr class="nav-divider">
-
-        <a href="{{ url_for('admin.admin_service_categories') }}" class="admin-nav-link"><i class="fa-solid fa-spray-can-sparkles fa-fw"></i>Services</a>
-        <a href="{{ url_for('admin.admin_blog') }}" class="admin-nav-link"><i class="fa-solid fa-newspaper fa-fw"></i>Blog</a>
-        <a href="{{ url_for('admin.activity_log') }}" class="admin-nav-link"><i class="fa-solid fa-clipboard-list fa-fw"></i>Activity Log</a>
-    </nav>
-    
+        <a href="{{ url_for('admin.admin_service_categories') }}" class="admin-nav-link dynamic-nav-link" data-target="{{ url_for('admin.admin_service_categories') }}"><i class="fa-solid fa-spray-can-sparkles fa-fw"></i>Services</a>
+        <a href="{{ url_for('admin.admin_blog') }}" class="admin-nav-link dynamic-nav-link" data-target="{{ url_for('admin.admin_blog') }}"><i class="fa-solid fa-newspaper fa-fw"></i>Blog</a>
+        <a href="{{ url_for('admin.activity_log') }}" class="admin-nav-link dynamic-nav-link" data-target="{{ url_for('admin.activity_log') }}"><i class="fa-solid fa-clipboard-list fa-fw"></i>Activity Log</a>
+      </nav>
       <div class="admin-sidebar-footer">
+         {# Kept profile link as standard (non-dynamic) for now #}
         <a href="{{ url_for('auth.profile') }}" class="admin-nav-link"><i class="fa-solid fa-user-pen fa-fw"></i>Edit My Profile</a>
         <a href="{{ url_for('main.index') }}" class="admin-nav-link"><i class="fa-solid fa-globe fa-fw"></i>View Public Site</a>
         <a href="{{ url_for('auth.logout') }}" class="admin-nav-link"><i class="fa-solid fa-right-from-bracket fa-fw"></i>Logout</a>
       </div>
     </aside>
-    <main class="admin-main-content">
+    <main class="admin-main-content" id="admin-main-content">
+      {# Initial content block remains #}
       {% block content %}{% endblock %}
     </main>
   </div>
+
+  {% block scripts %}
+    {# --- Dynamic Content Loading Script --- #}
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        const mainContentArea = document.getElementById('admin-main-content');
+        const adminNav = document.getElementById('admin-nav');
+
+        // Function to load content via Fetch
+        async function loadAdminContent(url, pushState = true) {
+          if (!mainContentArea) return;
+          mainContentArea.innerHTML = '<div class="loading-indicator">Loading...</div>'; // Show loading
+          console.log(`[Dynamic Load] Fetching content from: ${url}`);
+
+          try {
+            const response = await fetch(url, {
+              headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+
+            const html = await response.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+
+            const newContentContainer = doc.querySelector('#admin-main-content') || doc.querySelector('.admin-main-content');
+            const newTitle = doc.querySelector('title');
+
+            if (newContentContainer) {
+              console.log("[Dynamic Load] Content container found.");
+              mainContentArea.innerHTML = newContentContainer.innerHTML; // Replace inner content
+              document.title = newTitle ? newTitle.textContent : 'Admin - Nieuwburg Blitz'; // Update page title
+
+              if (pushState) {
+                history.pushState({ path: url }, '', url); // Update URL
+              }
+              updateActiveLink(url); // Highlight sidebar link
+
+              // *** MODIFIED SCRIPT INITIALIZATION ***
+              initializeScriptsAndDispatchEvent(mainContentArea); // Execute inline scripts and dispatch event
+
+            } else {
+               console.error("[Dynamic Load] Error: Could not find content block '#admin-main-content'.");
+               mainContentArea.innerHTML = '<div class="flash error">Error: Could not find content block in fetched page.</div>';
+            }
+          } catch (error) {
+            console.error('[Dynamic Load] Error loading admin content:', error);
+            mainContentArea.innerHTML = `<div class="flash error">Error loading content: ${error.message}</div>`;
+          }
+        }
+
+        // Function to update the active link in the sidebar
+        function updateActiveLink(url) {
+             if (!adminNav) return;
+            const links = adminNav.querySelectorAll('.admin-nav-link');
+            links.forEach(link => {
+                const targetUrl = (link.getAttribute('data-target') || '').replace(/\/$/, '');
+                const currentUrl = url.replace(/\/$/, ''); // Normalize URLs
+                if (targetUrl === currentUrl) {
+                    link.classList.add('active');
+                } else {
+                    link.classList.remove('active');
+                }
+            });
+        }
+
+        // *** REVISED SCRIPT INITIALIZATION FUNCTION (Just dispatch event) ***
+        function initializeScriptsAndDispatchEvent(contentArea) {
+             console.log("[Dynamic Load] Initializing scripts and preparing event dispatch...");
+             // 1. Re-add scripts to execute them
+             contentArea.querySelectorAll('script').forEach(oldScript => {
+                 const newScript = document.createElement('script');
+                 Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+                 if (!oldScript.src) {
+                     newScript.textContent = oldScript.textContent;
+                 }
+                 oldScript.parentNode.replaceChild(newScript, oldScript);
+                 console.log("[Dynamic Load] Re-added script:", newScript.src || "inline script");
+             });
+
+             // 2. Dispatch a custom event *after* scripts are potentially processed
+             // Use setTimeout to ensure event fires after script execution attempt
+             setTimeout(() => {
+                console.log("[Dynamic Load] Dispatching 'admin-content-loaded' event.");
+                const event = new CustomEvent('admin-content-loaded', { bubbles: true }); // Make event bubble up
+                contentArea.dispatchEvent(event);
+                console.log("[Dynamic Load] Event dispatched.");
+             }, 0); // Short delay
+        }
+        // *** END REVISED FUNCTION ***
+
+        // Attach click listeners to dynamic links
+        if (adminNav) {
+            adminNav.addEventListener('click', function(event) {
+                const link = event.target.closest('.dynamic-nav-link');
+                if (link) {
+                    event.preventDefault();
+                    const targetUrl = link.getAttribute('data-target');
+                    if (targetUrl && targetUrl !== window.location.pathname.replace(/\/$/, '')) {
+                         console.log(`[Dynamic Load] Link clicked, loading: ${targetUrl}`);
+                        loadAdminContent(targetUrl);
+                    }
+                }
+            });
+        }
+
+        // Handle browser back/forward buttons
+        window.addEventListener('popstate', function(event) {
+          if (event.state && event.state.path) {
+             console.log(`[Dynamic Load] Popstate event, loading: ${event.state.path}`);
+            loadAdminContent(event.state.path, false);
+          }
+        });
+
+        // Set initial active link and history state
+        updateActiveLink(window.location.pathname);
+         if (!history.state || !history.state.path) {
+             history.replaceState({ path: window.location.pathname }, '', window.location.pathname);
+         }
+
+         // *** ADDED: Dispatch event on initial page load ***
+         const initialContentArea = document.getElementById('admin-main-content');
+         if (initialContentArea) {
+             // Dispatch immediately on DOMContentLoaded for the initial page
+             console.log("[Dynamic Load] DOMContentLoaded - Dispatching initial 'admin-content-loaded' event.");
+             const initialEvent = new CustomEvent('admin-content-loaded', { bubbles: true });
+             initialContentArea.dispatchEvent(initialEvent);
+             console.log("[Dynamic Load] Initial event dispatched.");
+         }
+
+      });
+    </script>
+  {% endblock %}
+
 </body>
 </html>

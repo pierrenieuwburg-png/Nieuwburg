@@ -4,7 +4,8 @@
 {% block content %}
 <div class="admin-header">
     <h1>Blog Management</h1>
-    <a href="{{ url_for('admin_add_post') }}" class="cta">Add New Post</a>
+    {# Corrected url_for with admin prefix #}
+    <a href="{{ url_for('admin.admin_add_post') }}" class="cta">Add New Post</a>
 </div>
 
 <div class="admin-section">
@@ -36,8 +37,9 @@
                     </div>
                 </td>
                 <td class="action-buttons">
-                    <a href="{{ url_for('admin_edit_post', post_id=post.id) }}" class="cta-outline-small">Edit</a>
-                    <form action="{{ url_for('admin_delete_post', post_id=post.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this post?');">
+                    {# Corrected url_for calls #}
+                    <a href="{{ url_for('admin.admin_edit_post', post_id=post.id) }}" class="cta-outline-small">Edit</a>
+                    <form action="{{ url_for('admin.admin_delete_post', post_id=post.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this post?');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="cta-danger-small">Delete</button>
                     </form>
@@ -60,7 +62,7 @@
   width: 50px;
   height: 24px;
 }
-.switch input { 
+.switch input {
   opacity: 0;
   width: 0;
   height: 0;
@@ -106,7 +108,10 @@ input:checked + .slider:before {
     font-size: 0.9rem;
 }
 </style>
+{% endblock %} {# End block content #}
 
+{% block scripts %}
+{{ super() }} {# Include scripts from base if needed #}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const toggles = document.querySelectorAll('.status-toggle');
@@ -116,11 +121,11 @@ document.addEventListener('DOMContentLoaded', function() {
         toggle.addEventListener('change', function() {
             const postId = this.dataset.postId;
             const isPublished = this.checked;
-            
+
             // ** ADD THIS LINE to target the text span **
             const statusText = document.getElementById(`status-text-${postId}`);
 
-            fetch(`/admin/blog/toggle-status/${postId}`, {
+            fetch(`/admin/blog/toggle-status/${postId}`, { // Assuming this API endpoint exists
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -150,5 +155,4 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
-
 {% endblock %}

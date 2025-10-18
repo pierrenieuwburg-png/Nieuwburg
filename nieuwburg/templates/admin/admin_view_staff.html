@@ -5,8 +5,9 @@
 <div class="admin-header">
     <h1>{{ staff_member.profile.full_name or staff_member.email }}</h1>
     <div>
-        <a href="{{ url_for('admin_staff') }}" class="cta-outline">← Back to Staff List</a>
-        <a href="{{ url_for('admin_edit_staff', user_id=staff_member.id) }}" class="cta">Edit Details</a>
+        {# --- FIX 1 --- #}
+        <a href="{{ url_for('admin.staff') }}" class="cta-outline">← Back to Staff List</a>
+        <a href="{{ url_for('admin.edit_staff', user_id=staff_member.id) }}" class="cta">Edit Details</a>
     </div>
 </div>
 
@@ -24,7 +25,7 @@
     <h2>Personal Details</h2>
     <div class="profile-details">
         <div class="detail-item"><label>Full Name</label><p>{{ staff_member.profile.full_name or 'N/A' }}</p></div>
-        <div class="detail-item"><label>Username</label><p style="font-weight: bold; color: var(--accent);">{{ staff_member.username or 'N/A' }}</p></div>
+        {# Removed username as it's not in the model #}
         <div class="detail-item"><label>Email</label><p>{{ staff_member.email or 'N/A' }}</p></div>
         <div class="detail-item"><label>Phone Number</label><p>{{ staff_member.profile.phone_number or 'N/A' }}</p></div>
         <div class="detail-item"><label>Physical Address</label><p>{{ staff_member.profile.address or 'N/A' }}</p></div>
@@ -67,7 +68,8 @@
             <ul>
             {% for doc_filename in staff_member.profile.documents %}
                 <li>
-                    <a href="{{ url_for('static', filename='uploads/' + doc_filename) }}" target="_blank">{{ doc_filename.split('_', 1)[1] }}</a>
+                    {# Corrected file path logic to show original filename #}
+                    <a href="{{ url_for('static', filename='uploads/' + doc_filename) }}" target="_blank">{{ doc_filename.split('_', 1)[-1] or doc_filename }}</a>
                 </li>
             {% endfor %}
             </ul>
@@ -85,12 +87,14 @@
 
 <div class="admin-section">
     <h2 style="color: #c82333;">Danger Zone</h2>
-    <form action="{{ url_for('admin_reset_staff_password', user_id=staff_member.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to reset this staff member\'s password?');" style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #eee;">
+    {# --- FIX 2 --- #}
+    <form action="{{ url_for('admin.reset_staff_password', user_id=staff_member.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to reset this staff member\'s password?');" style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #eee;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <p>Generate a new activation link or one-time PIN and require the staff member to set a new password on their next login.</p>
+        <p>Generate a new activation link and require the staff member to set a new password on their next login.</p>
         <button type="submit" class="cta-outline">Reset Password</button>
     </form>
-    <form action="{{ url_for('admin_delete_staff', user_id=staff_member.id) }}" method="POST" onsubmit="return confirm('DANGER: You are about to permanently delete this staff member. This action cannot be undone. Are you absolutely sure?');">
+    {# --- FIX 3 --- #}
+    <form action="{{ url_for('admin.delete_staff', user_id=staff_member.id) }}" method="POST" onsubmit="return confirm('DANGER: You are about to permanently delete this staff member. This action cannot be undone. Are you absolutely sure?');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <p>Permanently remove this staff member and all associated data from the system.</p>
         <button type="submit" class="cta-danger">Delete Staff Member</button>

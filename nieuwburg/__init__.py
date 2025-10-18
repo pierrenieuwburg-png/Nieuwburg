@@ -10,6 +10,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from config import Config
 from datetime import datetime
+import pytz # Import pytz
 
 # Initialize extensions
 db = SQLAlchemy()
@@ -21,6 +22,25 @@ limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["200 per day", "50 per hour"]
 )
+
+# --- ADDED: Timezone conversion filter ---
+def to_sast(utc_dt):
+    """Converts a UTC datetime object to SAST (Africa/Johannesburg)."""
+    if utc_dt is None:
+        return None
+    try:
+        utc_timezone = pytz.timezone('UTC')
+        sast_timezone = pytz.timezone('Africa/Johannesburg')
+        # Ensure the datetime object is timezone-aware (assume UTC if naive)
+        if utc_dt.tzinfo is None:
+            aware_utc_dt = utc_timezone.localize(utc_dt)
+        else:
+            aware_utc_dt = utc_dt.astimezone(utc_timezone)
+        return aware_utc_dt.astimezone(sast_timezone)
+    except Exception as e:
+        print(f"Error converting timezone: {e}")
+        return utc_dt # Return original on error
+# --- END ADDED FILTER ---
 
 def create_app(config_class=Config):
     """Create and configure an instance of the Flask application."""
@@ -63,6 +83,11 @@ def create_app(config_class=Config):
         register_form = RegistrationForm()
         return dict(login_form=login_form, register_form=register_form)
 
+    # --- Register the custom Jinja filter ---
+    app.jinja_env.filters['to_sast'] = to_sast
+    # --- END FILTER REGISTRATION ---
+
+
     # Configure Google OAuth within the app context
     oauth.register(
         name='google',
@@ -82,5 +107,13 @@ def create_app(config_class=Config):
         app.register_blueprint(auth_bp, url_prefix='/auth')
         app.register_blueprint(admin_bp, url_prefix='/admin')
         app.register_blueprint(api_bp, url_prefix='/api')
+
+    @app.after_request
+    def add_security_headers(response):
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        # Note: Flask/Werkzeug manage Cache-Control well, especially in non-debug.
+        # Avoid setting 'Expires' manually unless you have a very specific legacy need.
+        # The 'no-store' during debug is expected and okay for development.
+        return response
 
     return app

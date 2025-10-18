@@ -5,20 +5,25 @@
 
 <div class="admin-header">
 <h1>Staff Management</h1>
-<a href="{{ url_for('admin.add_staff') }}" class="cta">Add New Staff</a>
+<button type="button" class="cta" id="add-staff-button">Add New Staff</button>
 </div>
 
+<div id="staff-flash-messages" style="margin-bottom: 20px;">
 {% with messages = get_flashed_messages(with_categories=true) %}
 {% if messages %}
-<div class="flash-messages" style="margin-bottom: 20px;">
-{% for category, message in messages %}
-<div class="flash {{ category }}">{{ message }}</div>
-{% endfor %}
-</div>
+    {% for category, message in messages %}
+    <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
 {% endif %}
 {% endwith %}
+</div>
 
 <div class="admin-section">
+<div class="form-group" style="margin-bottom: 20px; max-width: 400px;">
+    <label for="staff-search" class="form-label">Search Staff</label>
+    <input type="text" id="staff-search" class="form-control" placeholder="Search by name or email...">
+</div>
+
 <table class="data-table">
 <thead>
   <tr>
@@ -30,32 +35,267 @@
     <th style="width: 120px;">Actions</th>
   </tr>
 </thead>
-<tbody>
-{% for item in staff_with_age %}
-<tr>
-<td>
-    {% set staff = item.staff %}
-    {% set default_avatar_url = url_for('static', filename='img/avatar_picture_profile_user_icon.png') %}
-    {% if staff.profile.profile_image == 'avatar_picture_profile_user_icon.png' %}
-    <img src="{{ url_for('static', filename='img/' + staff.profile.profile_image) }}" alt="Avatar" class="avatar-small default-avatar">
-    {% else %}
-    <img src="{{ url_for('static', filename='uploads/' + staff.profile.profile_image) }}" alt="Avatar" class="avatar-small" onerror="this.onerror=null; this.src='{{ default_avatar_url }}';">
-    {% endif %}
-</td>
-<td>{{ staff.profile.full_name or 'N/A' }}</td>
-<td>{{ staff.email or 'N/A' }}</td>
-<td>{{ staff.profile.phone_number or 'N/A' }}</td>
-<td>{{ item.age or 'N/A' }}</td>
-<td>
-    <a href="{{ url_for('admin.view_staff', user_id=staff.id) }}" class="cta-outline-small">View</a>
-</td>
+<tbody id="staff-table-body">
+<tr id="initial-loading-row"> {# Added ID #}
+    <td colspan="6" style="text-align: center; padding: 20px;">Loading staff members...</td>
 </tr>
-{% else %}
-<tr>
-<td colspan="6" style="text-align: center; padding: 20px;">No staff members found.</td>
-</tr>
-{% endfor %}
 </tbody>
 </table>
 </div>
+
+{# --- Add Staff Modal --- #}
+<div id="add-staff-modal" class="modal-overlay simple-modal" style="display: none;">
+<div class="modal-content auth-modal-content" style="max-width: 500px;">
+    <button id="close-add-staff-modal" class="modal-close" aria-label="Close form">&times;</button>
+    <h2 class="auth-title">Add New Staff Member</h2>
+
+    <div id="add-staff-error-message" class="flash error" style="display: none; margin-top: 0;"></div>
+
+    <form id="add-staff-form" class="auth-form-modal active" style="padding-top: 15px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+            <label for="add-staff-full_name">Full Name</label>
+            <input type="text" id="add-staff-full_name" name="full_name" class="form-control" required>
+        </div>
+        <div class="form-group">
+            <label for="add-staff-email">Email</label>
+            <input type="email" id="add-staff-email" name="email" class="form-control" required>
+        </div>
+        <div class="form-group">
+            <label for="add-staff-phone_number">Phone Number</label>
+            <input type="tel" id="add-staff-phone_number" name="phone_number" class="form-control">
+        </div>
+        <div class="form-group">
+            <label for="add-staff-address">Address</label>
+            <textarea id="add-staff-address" name="address" class="form-control" rows="3"></textarea>
+        </div>
+        <div class="form-group">
+            <label for="add-staff-id_number">South African ID Number</label>
+            <input type="text" id="add-staff-id_number" name="id_number" class="form-control" maxlength="13">
+        </div>
+
+        {# --- NEW CHECKBOX --- #}
+        <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px; background-color: #f4f7fa; padding: 10px; border-radius: 8px;">
+            <input type="checkbox" id="send_activation_email" name="send_activation_email" value="true" checked style="width: 20px; height: 20px;">
+            <label for="send_activation_email" style="font-weight: bold; margin-bottom: 0;">Send activation email to staff member</label>
+        </div>
+        {# --- END NEW CHECKBOX --- #}
+
+        <button type="submit" class="cta">Save Staff Member</button>
+    </form>
+</div>
+</div>
+{# --- End Add Staff Modal --- #}
+
+{% endblock %} {# End block content #}
+
+{% block scripts %}
+{# {{ super() }} #}
+<script>
+    console.log("[Staff Page Script] Script block started execution."); // DEBUG LOG
+
+    // --- Define the Initialization Function ---
+    function initializeStaffManagement() {
+        console.log("[Staff Page Script] initializeStaffManagement function CALLED."); // DEBUG LOG
+
+        // --- Element Variables ---
+        const staffSearchInput = document.getElementById('staff-search');
+        const staffTableBody = document.getElementById('staff-table-body');
+        const noStaffRowHTML = '<tr id="no-staff-row"><td colspan="6" style="text-align: center; padding: 20px;">No staff members found.</td></tr>';
+        const addStaffButton = document.getElementById('add-staff-button');
+        const addStaffModal = document.getElementById('add-staff-modal');
+        const closeAddStaffModalButton = document.getElementById('close-add-staff-modal');
+        const addStaffForm = document.getElementById('add-staff-form');
+        const addStaffErrorMessage = document.getElementById('add-staff-error-message');
+        const staffFlashMessages = document.getElementById('staff-flash-messages');
+        const defaultAvatarUrl = "{{ url_for('static', filename='img/avatar_picture_profile_user_icon.png') }}";
+
+        // --- Staff Search Logic ---
+        let performSearch;
+        if (staffSearchInput && staffTableBody) {
+            let searchTimeout;
+            performSearch = async (showLoading = true) => {
+                 console.log("[Staff Page Script] performSearch called. showLoading:", showLoading); // DEBUG LOG
+                const query = staffSearchInput.value;
+                try {
+                    const initialLoadingRow = document.getElementById('initial-loading-row');
+                    if (showLoading && initialLoadingRow) {
+                        staffTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px;">Searching...</td></tr>';
+                    } else if (initialLoadingRow) {
+                        initialLoadingRow.remove();
+                    }
+                    const response = await fetch(`/api/admin/staff/search?q=${encodeURIComponent(query)}`);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const staffList = await response.json();
+                    staffTableBody.innerHTML = '';
+                    if (staffList.length > 0) {
+                        console.log(`[Staff Page Script] Found ${staffList.length} staff members.`); // DEBUG LOG
+                        staffList.forEach(staff => {
+                            const profileImage = staff.profile_image || 'avatar_picture_profile_user_icon.png';
+                            const imageUrl = (profileImage === 'avatar_picture_profile_user_icon.png')
+                                ? `{{ url_for('static', filename='img/') }}${profileImage}`
+                                : `{{ url_for('static', filename='uploads/') }}${profileImage}`;
+                            const row = `
+                                <tr class="staff-row" data-staff-id="${staff.id}">
+                                    <td>
+                                        <img src="${imageUrl}" alt="Avatar" class="avatar-small" onerror="this.onerror=null; this.src='${defaultAvatarUrl}';">
+                                    </td>
+                                    <td>${staff.full_name || 'N/A'}</td>
+                                    <td>${staff.email || 'N/A'}</td>
+                                    <td>${staff.phone_number || 'N/A'}</td>
+                                    <td>${staff.age || 'N/A'}</td>
+                                    <td><a href="${staff.view_url}" class="cta-outline-small">View</a></td>
+                                </tr>`;
+                            staffTableBody.insertAdjacentHTML('beforeend', row);
+                        });
+                    } else {
+                        console.log("[Staff Page Script] No staff found for query:", query); // DEBUG LOG
+                        staffTableBody.innerHTML = noStaffRowHTML;
+                        const noStaffCell = staffTableBody.querySelector('#no-staff-row td');
+                        if (noStaffCell && query) noStaffCell.textContent = 'No staff members found matching your search.';
+                        else if (noStaffCell) noStaffCell.textContent = 'No staff members found.';
+                    }
+                } catch (error) {
+                    console.error("[Staff Page Script] Error fetching/rendering staff:", error); // DEBUG LOG
+                    staffTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: red; padding: 20px;">Error loading staff.</td></tr>';
+                }
+            };
+
+            // --- Define Search Input Handler ---
+            function handleSearchInput() {
+                console.log("[Staff Page Script] Search input changed."); // DEBUG LOG
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => performSearch(), 300);
+            }
+
+            // --- Attach Search Listener ---
+            if (!staffSearchInput.hasAttribute('data-listener-attached')) {
+                staffSearchInput.addEventListener('input', handleSearchInput);
+                staffSearchInput.setAttribute('data-listener-attached', 'true');
+                console.log("[Staff Page Script] Added search input listener."); // DEBUG LOG
+            }
+
+        } else {
+             console.error("[Staff Page Script] Search input or table body not found!"); // DEBUG LOG
+        }
+
+        // --- Add Staff Modal Logic ---
+        if (addStaffButton && addStaffModal && closeAddStaffModalButton && addStaffForm) {
+
+            // --- Define Modal Handlers ---
+            function openAddStaffModalHandler(event) {
+                console.log("[Staff Page Script] Opening Add Staff Modal."); // DEBUG LOG
+                if(event) event.preventDefault();
+                if (addStaffErrorMessage) addStaffErrorMessage.style.display = 'none';
+                addStaffForm.reset();
+                const sendEmailCheckbox = document.getElementById('send_activation_email');
+                if (sendEmailCheckbox) sendEmailCheckbox.checked = true;
+                addStaffModal.style.display = 'flex';
+            }
+            function closeModalHandler() {
+                console.log("[Staff Page Script] Closing Add Staff Modal."); // DEBUG LOG
+                addStaffModal.style.display = 'none';
+            }
+            function modalBackgroundClickHandler(event) {
+                if (event.target === addStaffModal) { closeModalHandler(); }
+            }
+            async function addStaffFormSubmitHandler(event) {
+                console.log("[Staff Page Script] Add Staff form submitted."); // DEBUG LOG
+                event.preventDefault();
+                if (addStaffErrorMessage) addStaffErrorMessage.style.display = 'none';
+                const formData = new FormData(addStaffForm);
+                const data = Object.fromEntries(formData.entries());
+                const sendEmailCheckbox = document.getElementById('send_activation_email');
+                data.send_activation_email = sendEmailCheckbox ? sendEmailCheckbox.checked : false;
+                const csrfToken = data.csrf_token;
+                try {
+                    const response = await fetch('/api/admin/staff', {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                       body: JSON.stringify(data)
+                    });
+                    const result = await response.json();
+                    if (response.ok) {
+                       closeModalHandler();
+                       if(staffFlashMessages) {
+                           staffFlashMessages.innerHTML = `<div class="flash success">${result.message || 'Staff member added!'}</div>`;
+                           setTimeout(() => staffFlashMessages.innerHTML = '', 4000);
+                       }
+                        console.log("[Staff Page Script] Refreshing staff list after add."); // DEBUG LOG
+                       if (typeof performSearch === 'function') {
+                           await performSearch(false);
+                       }
+                    } else {
+                       console.log("[Staff Page Script] Add Staff API call failed:", result.message); // DEBUG LOG
+                       if(addStaffErrorMessage) {
+                           addStaffErrorMessage.textContent = result.message || 'An error occurred.';
+                           addStaffErrorMessage.style.display = 'block';
+                       }
+                    }
+                } catch (error) {
+                    console.error('[Staff Page Script] Error submitting form:', error); // DEBUG LOG
+                     if(addStaffErrorMessage) {
+                       addStaffErrorMessage.textContent = 'A network error occurred. Please try again.';
+                       addStaffErrorMessage.style.display = 'block';
+                     }
+                }
+            }
+
+            // --- Attach Modal Listeners ---
+            if (!addStaffButton.hasAttribute('data-listener-attached')) {
+                addStaffButton.addEventListener('click', openAddStaffModalHandler);
+                addStaffButton.setAttribute('data-listener-attached', 'true');
+                console.log("[Staff Page Script] Added 'Add Staff' button listener."); // DEBUG LOG
+            }
+            if (closeAddStaffModalButton && !closeAddStaffModalButton.hasAttribute('data-listener-attached')) {
+                closeAddStaffModalButton.addEventListener('click', closeModalHandler);
+                closeAddStaffModalButton.setAttribute('data-listener-attached', 'true');
+                console.log("[Staff Page Script] Added 'Close Modal' button listener."); // DEBUG LOG
+            }
+            if (!addStaffModal.hasAttribute('data-listener-attached')) {
+                addStaffModal.addEventListener('click', modalBackgroundClickHandler);
+                addStaffModal.setAttribute('data-listener-attached', 'true');
+                console.log("[Staff Page Script] Added modal background click listener."); // DEBUG LOG
+            }
+            if (!addStaffForm.hasAttribute('data-listener-attached')) {
+                addStaffForm.addEventListener('submit', addStaffFormSubmitHandler);
+                addStaffForm.setAttribute('data-listener-attached', 'true');
+                console.log("[Staff Page Script] Added form submit listener."); // DEBUG LOG
+            }
+
+        } else {
+            console.error("[Staff Page Script] One or more Add Staff Modal elements were NOT found!"); // DEBUG LOG
+        }
+
+        // --- Call performSearch immediately ---
+         if (typeof performSearch === 'function') {
+            performSearch(); // Initial load
+         } else {
+             console.error("[Staff Page Script] performSearch is not defined, cannot perform initial load."); // DEBUG LOG
+         }
+
+    } // --- End initializeStaffManagement ---
+
+
+    // --- Attach Event Listener to main content area ---
+    const mainContentAreaForStaff = document.getElementById('admin-main-content');
+    if (mainContentAreaForStaff) {
+         if (!mainContentAreaForStaff.hasAttribute('data-staff-listener')) {
+            mainContentAreaForStaff.addEventListener('admin-content-loaded', initializeStaffManagement);
+            mainContentAreaForStaff.setAttribute('data-staff-listener', 'true');
+            console.log("[Staff Page Script] Added 'admin-content-loaded' event listener."); // DEBUG LOG
+
+             // --- Trigger initialisation immediately if the content is already present (initial page load) ---
+             if(document.getElementById('staff-search') && document.getElementById('staff-table-body')) {
+                console.log("[Staff Page Script] Content already present, calling initializeStaffManagement directly."); // DEBUG LOG
+                initializeStaffManagement();
+             } else {
+                 console.log("[Staff Page Script] Initial content not detected, waiting for event."); // DEBUG LOG
+             }
+         }
+    } else {
+        console.error("[Staff Page Script] Could not find #admin-main-content to attach listener."); // DEBUG LOG
+    }
+
+</script>
 {% endblock %}

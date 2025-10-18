@@ -27,15 +27,15 @@
             </div>
             <div class="form-group">
                 {{ form.full_name.label }}
-                {{ form.full_name(class="form-control") }}
+                {{ form.full_name(class="form-control", autocomplete="name") }}
             </div>
             <div class="form-group">
                 {{ form.phone_number.label }}
-                {{ form.phone_number(class="form-control") }}
+                {{ form.phone_number(class="form-control", autocomplete="tel") }}
             </div>
             <div class="form-group">
                 {{ form.address.label }}
-                {{ form.address(rows=4, class="form-control") }}
+                {{ form.address(rows=4, class="form-control", autocomplete="street-address") }}
             </div>
             {{ form.submit(class="cta auth-button") }}
         </form>

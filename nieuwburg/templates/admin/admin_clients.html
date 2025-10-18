@@ -4,48 +4,283 @@
 {% block content %}
 
 <div class="admin-header">
-<h1>Client Management</h1>
-<a href="{{ url_for('admin.add_client') }}" class="cta">Add New Client</a>
+    <h1>Client Management</h1>
+    {# Button to trigger modal #}
+    <button type="button" class="cta" id="add-client-button">Add New Client</button>
 </div>
 
-{% with messages = get_flashed_messages(with_categories=true) %}
-{% if messages %}
-<div class="flash-messages" style="margin-bottom: 20px;">
-{% for category, message in messages %}
-<div class="flash {{ category }}">{{ message }}</div>
-{% endfor %}
+{# Flash messages container (can be updated via JS later) #}
+<div id="client-flash-messages" style="margin-bottom: 20px;">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
 </div>
-{% endif %}
-{% endwith %}
+
 
 <div class="admin-section">
-<table class="data-table">
-<thead>
-  <tr>
-    <th>Name</th>
-    <th>Email</th>
-    <th>Phone</th>
-    <th>Address</th>
-    <th style="width: 120px;">Actions</th>
-  </tr>
-</thead>
-<tbody>
-{% for client in clients %}
-<tr>
-<td>{{ client.profile.full_name or 'N/A' }}</td>
-<td>{{ client.email }}</td>
-<td>{{ client.profile.phone_number or 'N/A' }}</td>
-<td>{{ client.profile.address or 'N/A' }}</td>
-<td>
-     <a href="{{ url_for('admin.view_client', user_id=client.id) }}" class="cta-outline-small">View</a>
-</td>
-</tr>
-{% else %}
-<tr>
-<td colspan="5" style="text-align: center; padding: 20px;">No clients found.</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
+    {# Search Input #}
+    <div class="form-group" style="margin-bottom: 20px; max-width: 400px;">
+        <label for="client-search" class="form-label">Search Clients</label>
+        <input type="text" id="client-search" class="form-control" placeholder="Search by name or email...">
+    </div>
+
+    <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Phone</th>
+            <th>Address</th>
+            <th style="width: 120px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="client-table-body">
+            {# Initial rows will be populated by JS during initial load #}
+            <tr id="initial-loading-row"><td colspan="5" style="text-align: center; padding: 20px;">Loading clients...</td></tr>
+        </tbody>
+    </table>
 </div>
+
+{# --- Add Client Modal --- #}
+<div id="add-client-modal" class="modal-overlay simple-modal" style="display: none;">
+    <div class="modal-content auth-modal-content" style="max-width: 500px;"> {# Adjusted size #}
+        <button id="close-add-client-modal" class="modal-close" aria-label="Close form">&times;</button>
+        <h2 class="auth-title">Add New Client</h2>
+
+        {# Container for modal-specific error messages #}
+        <div id="add-client-error-message" class="flash error" style="display: none; margin-top: 0;"></div>
+
+        <form id="add-client-form" class="auth-form-modal active" style="padding-top: 15px;">
+            {# Add CSRF token - essential for POST requests #}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="form-group">
+                <label for="add-client-full_name">Full Name</label>
+                <input type="text" id="add-client-full_name" name="full_name" class="form-control" required>
+            </div>
+            <div class="form-group">
+                <label for="add-client-email">Email</label>
+                <input type="email" id="add-client-email" name="email" class="form-control" required>
+            </div>
+            <div class="form-group">
+                <label for="add-client-phone_number">Phone Number</label>
+                <input type="tel" id="add-client-phone_number" name="phone_number" class="form-control">
+            </div>
+            <div class="form-group">
+                <label for="add-client-address">Address</label>
+                <textarea id="add-client-address" name="address" class="form-control" rows="3"></textarea>
+            </div>
+            <button type="submit" class="cta">Save Client</button>
+        </form>
+    </div>
+</div>
+{# --- End Add Client Modal --- #}
+
+{% endblock %} {# End block content #}
+
+{% block scripts %}
+{# {{ super() }} #}
+<script>
+    console.log("[Client Page Script] Script block started execution."); // DEBUG LOG
+
+    // --- Define the Initialization Function ---
+    function initializeClientManagement() {
+        console.log("[Client Page Script] initializeClientManagement function CALLED."); // DEBUG LOG
+
+        // --- Element Variables ---
+        const clientSearchInput = document.getElementById('client-search');
+        const clientTableBody = document.getElementById('client-table-body');
+        const noClientsRowHTML = '<tr id="no-clients-row"><td colspan="5" style="text-align: center; padding: 20px;">No clients found.</td></tr>';
+        const addClientButton = document.getElementById('add-client-button');
+        const addClientModal = document.getElementById('add-client-modal');
+        const closeAddClientModalButton = document.getElementById('close-add-client-modal');
+        const addClientForm = document.getElementById('add-client-form');
+        const addClientErrorMessage = document.getElementById('add-client-error-message');
+        const clientFlashMessages = document.getElementById('client-flash-messages');
+
+        // --- Client Search Logic ---
+        let performSearch;
+        if (clientSearchInput && clientTableBody) {
+            let searchTimeout;
+            performSearch = async (showLoading = true) => {
+                console.log("[Client Page Script] performSearch called. showLoading:", showLoading); // DEBUG LOG
+                const query = clientSearchInput.value;
+                try {
+                    const initialLoadingRow = document.getElementById('initial-loading-row');
+                    if (showLoading && initialLoadingRow) {
+                        clientTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px;">Searching...</td></tr>';
+                    } else if (initialLoadingRow) {
+                        initialLoadingRow.remove();
+                    }
+                    const response = await fetch(`/api/admin/clients/search?q=${encodeURIComponent(query)}`);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const clients = await response.json();
+                    clientTableBody.innerHTML = '';
+                    if (clients.length > 0) {
+                        console.log(`[Client Page Script] Found ${clients.length} clients.`); // DEBUG LOG
+                        clients.forEach(client => {
+                            const viewUrl = client.view_url;
+                            const row = `
+                                <tr class="client-row" data-client-id="${client.id}">
+                                    <td class="client-name">${client.full_name || 'N/A'}</td>
+                                    <td class="client-email">${client.email}</td>
+                                    <td class="client-phone">${client.phone_number || 'N/A'}</td>
+                                    <td class="client-address">${client.address || 'N/A'}</td>
+                                    <td><a href="${viewUrl}" class="cta-outline-small">View</a></td>
+                                </tr>`;
+                            clientTableBody.insertAdjacentHTML('beforeend', row);
+                        });
+                    } else {
+                        console.log("[Client Page Script] No clients found for query:", query); // DEBUG LOG
+                        clientTableBody.innerHTML = noClientsRowHTML;
+                        const noClientsCell = clientTableBody.querySelector('#no-clients-row td');
+                        if (noClientsCell && query) noClientsCell.textContent = 'No clients found matching your search.';
+                        else if (noClientsCell) noClientsCell.textContent = 'No clients found.';
+                    }
+                } catch (error) {
+                    console.error("[Client Page Script] Error fetching/rendering clients:", error); // DEBUG LOG
+                    clientTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: red; padding: 20px;">Error loading clients.</td></tr>';
+                }
+            };
+
+            // --- Define Search Input Handler ---
+            // Naming the handler function allows us to remove it later if needed
+            function handleSearchInput() {
+                 console.log("[Client Page Script] Search input changed."); // DEBUG LOG
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => performSearch(), 300);
+            }
+
+            // --- Attach Search Listener ---
+            // Check if listener already exists before adding (might not be necessary with this structure but safer)
+             if (!clientSearchInput.hasAttribute('data-listener-attached')) {
+                clientSearchInput.addEventListener('input', handleSearchInput);
+                clientSearchInput.setAttribute('data-listener-attached', 'true');
+                console.log("[Client Page Script] Added search input listener."); // DEBUG LOG
+            }
+
+
+        } else {
+             console.error("[Client Page Script] Search input or table body not found!"); // DEBUG LOG
+        }
+
+        // --- Add Client Modal Logic ---
+        if (addClientButton && addClientModal && closeAddClientModalButton && addClientForm && addClientErrorMessage) {
+
+            // --- Define Modal Handlers ---
+            function openAddClientModalHandler(event) {
+                console.log("[Client Page Script] Opening Add Client Modal."); // DEBUG LOG
+                if(event) event.preventDefault();
+                addClientErrorMessage.style.display = 'none';
+                addClientForm.reset();
+                addClientModal.style.display = 'flex';
+            }
+            function closeModalHandler() {
+                console.log("[Client Page Script] Closing Add Client Modal."); // DEBUG LOG
+                addClientModal.style.display = 'none';
+            }
+            function modalBackgroundClickHandler(event) {
+                if (event.target === addClientModal) { closeModalHandler(); }
+            }
+           async function addClientFormSubmitHandler(event) {
+                console.log("[Client Page Script] Add Client form submitted."); // DEBUG LOG
+                event.preventDefault();
+                addClientErrorMessage.style.display = 'none';
+                const formData = new FormData(addClientForm);
+                const data = Object.fromEntries(formData.entries());
+                const csrfToken = formData.get('csrf_token');
+                try {
+                    const response = await fetch('/api/admin/clients', {
+                       method: 'POST',
+                       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                       body: JSON.stringify(data)
+                    });
+                    const result = await response.json();
+                    if (response.ok) {
+                       closeModalHandler();
+                       if (clientFlashMessages) {
+                           clientFlashMessages.innerHTML = `<div class="flash success">${result.message || 'Client added successfully!'}</div>`;
+                           setTimeout(() => clientFlashMessages.innerHTML = '', 4000);
+                       }
+                       if (typeof performSearch === 'function') {
+                           console.log("[Client Page Script] Refreshing client list after add."); // DEBUG LOG
+                           await performSearch(false);
+                       } else { console.error("[Client Page Script] performSearch not defined."); }
+                    } else {
+                        console.log("[Client Page Script] Add Client API call failed:", result.message); // DEBUG LOG
+                        addClientErrorMessage.textContent = result.message || 'An error occurred.';
+                        addClientErrorMessage.style.display = 'block';
+                    }
+                } catch (error) {
+                    console.error('[Client Page Script] Error submitting form:', error); // DEBUG LOG
+                    addClientErrorMessage.textContent = 'A network error occurred. Please try again.';
+                    addClientErrorMessage.style.display = 'block';
+                }
+           }
+
+            // --- Attach Modal Listeners ---
+            // Only add listeners if they haven't been attached before
+             if (!addClientButton.hasAttribute('data-listener-attached')) {
+                addClientButton.addEventListener('click', openAddClientModalHandler);
+                addClientButton.setAttribute('data-listener-attached', 'true');
+                console.log("[Client Page Script] Added 'Add Client' button listener."); // DEBUG LOG
+            }
+            if (!closeAddClientModalButton.hasAttribute('data-listener-attached')) {
+                closeAddClientModalButton.addEventListener('click', closeModalHandler);
+                closeAddClientModalButton.setAttribute('data-listener-attached', 'true');
+                console.log("[Client Page Script] Added 'Close Modal' button listener."); // DEBUG LOG
+            }
+            if (!addClientModal.hasAttribute('data-listener-attached')) {
+                addClientModal.addEventListener('click', modalBackgroundClickHandler);
+                addClientModal.setAttribute('data-listener-attached', 'true');
+                console.log("[Client Page Script] Added modal background click listener."); // DEBUG LOG
+            }
+            if (!addClientForm.hasAttribute('data-listener-attached')) {
+                addClientForm.addEventListener('submit', addClientFormSubmitHandler);
+                addClientForm.setAttribute('data-listener-attached', 'true');
+                console.log("[Client Page Script] Added form submit listener."); // DEBUG LOG
+            }
+
+
+        } else {
+            console.error("[Client Page Script] One or more Add Client Modal elements were NOT found!"); // DEBUG LOG
+        }
+
+        // --- Call performSearch immediately ---
+        if (typeof performSearch === 'function') {
+            performSearch(); // Perform initial load/search
+        } else {
+            console.error("[Client Page Script] performSearch is not defined, cannot perform initial load."); // DEBUG LOG
+        }
+
+    } // --- End initializeClientManagement ---
+
+
+    // --- Attach Event Listener to main content area ---
+    const mainContentAreaForClient = document.getElementById('admin-main-content');
+    if (mainContentAreaForClient) {
+        // Check if listener already exists to prevent duplicates on potential reloads/errors
+        if (!mainContentAreaForClient.hasAttribute('data-client-listener')) {
+            mainContentAreaForClient.addEventListener('admin-content-loaded', initializeClientManagement);
+            mainContentAreaForClient.setAttribute('data-client-listener', 'true');
+            console.log("[Client Page Script] Added 'admin-content-loaded' event listener."); // DEBUG LOG
+
+             // --- Trigger initialisation immediately if the content is already present (initial page load) ---
+             // Check if the specific elements for this page exist before calling
+             if(document.getElementById('client-search') && document.getElementById('client-table-body')) {
+                console.log("[Client Page Script] Content already present, calling initializeClientManagement directly."); // DEBUG LOG
+                initializeClientManagement();
+             } else {
+                 console.log("[Client Page Script] Initial content not detected, waiting for event."); // DEBUG LOG
+             }
+        }
+    } else {
+        console.error("[Client Page Script] Could not find #admin-main-content to attach listener."); // DEBUG LOG
+    }
+
+</script>
 {% endblock %}
