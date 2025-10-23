@@ -9,3 +9,6 @@ Authlib
 Flask-Limiter
 pytz
 redis
+msgspec
+xhtml2pdf
+email-validator

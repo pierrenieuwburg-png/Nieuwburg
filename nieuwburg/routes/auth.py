@@ -90,7 +90,7 @@ def login():
             login_user(user, remember=form.remember_me.data)
             
             redirect_url = url_for('main.client_dashboard')
-            if user.role == 'admin': redirect_url = url_for('admin.dashboard')
+            if user.role == 'admin': redirect_url = url_for('admin.admin_spa_shell')
             elif user.role == 'staff': redirect_url = url_for('main.staff_dashboard')
             
             if is_ajax: return jsonify({'status': 'ok', 'redirect': redirect_url})

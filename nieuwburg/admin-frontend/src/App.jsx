@@ -12,6 +12,9 @@ import Services from './pages/Services';
 import Blog from './pages/Blog';
 import ActivityLog from './pages/ActivityLog';
 import ClientDetail from './pages/ClientDetail';
+import StaffDetail from './pages/StaffDetail';
+import EditStaff from './pages/EditStaff';
+import EditClient from './pages/EditClient';
 
 // Placeholder for unmatched routes
 const NotFound = () => <h2>Admin Page Not Found</h2>;
@@ -26,8 +29,11 @@ function App() {
       <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/clients" element={<Clients />} />
       <Route path="/clients/:clientId" element={<ClientDetail />} />
+      <Route path="/client/edit/:clientId" element={<EditClient />} />
       <Route path="/staff" element={<Staff />} />
+      <Route path="/staff/:staffId" element={<StaffDetail />} />
       <Route path="/bookings" element={<Bookings />} />
+      <Route path="/staff/edit/:staffId" element={<EditStaff />} />
       <Route path="/applications" element={<Applications />} />
       <Route path="/quotes" element={<Quotes />} />
       <Route path="/invoices" element={<Invoices />} />

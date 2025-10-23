@@ -2640,3 +2640,64 @@ input.invalid-input {
   font-size: 1.2rem;
   color: #aaa;
 }
+.edit-form {
+    max-width: 700px;
+    margin: 20px auto;
+    padding: 24px;
+    background-color: #ffffff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.edit-form .form-group {
+    margin-bottom: 18px;
+    display: flex;
+    flex-direction: column;
+}
+
+.edit-form .form-group label {
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+    color: #333;
+}
+
+.edit-form .form-group input[type="text"],
+.edit-form .form-group input[type="email"],
+.edit-form .form-group input[type="tel"],
+.edit-form .form-group input[type="number"],
+.edit-form .form-group textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 1rem;
+    box-sizing: border-box; /* Important for padding */
+}
+
+.edit-form .form-group input:disabled {
+    background-color: #f4f4f4;
+    cursor: not-allowed;
+}
+
+.edit-form .form-actions {
+    margin-top: 24px;
+    display: flex;
+    gap: 12px;
+}
+
+.button-secondary {
+    padding: 10px 16px;
+    border: 1px solid #ccc;
+    background-color: #f9f9f9;
+    color: #333;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+.button-secondary:hover {
+    background-color: #f0f0f0;
+    border-color: #bbb;
+}

@@ -1,15 +1,26 @@
 from flask import Blueprint, jsonify, request, current_app, flash, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import or_ 
+from sqlalchemy import or_
+from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.attributes import flag_modified
 import secrets
+import json
+import requests
+import pytz
+import os
+import uuid
+import traceback
+from werkzeug.utils import secure_filename
+from datetime import date
 from .. import db
 from ..models import (Post, ServiceCategory, ServiceItem, Job, User, Profile,
-                     QuoteRequest, StaffApplication, SpecializedQuoteRequest, ActivityLog)
-from ..forms import AddClientForm, AddStaffForm
+                     QuoteRequest, StaffApplication, SpecializedQuoteRequest, ActivityLog, Invoice)
+from ..forms import AddClientForm, AddStaffForm, EditStaffForm, EditClientForm
 from .auth import generate_confirmation_token
 from .. import mail
 from flask_mail import Message
 from .utils import log_activity, send_async_email # Keep existing utils import
+
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -64,7 +75,7 @@ def api_add_client():
                     'email': new_client.email,
                     'phone_number': new_profile.phone_number, # Send back all relevant data
                     'address': new_profile.address,
-                    'view_url': url_for('admin.view_client', user_id=new_client.id) # Include view URL
+                    #'view_url': url_for('admin.view_client', user_id=new_client.id) # Include view URL
                 }
              }), 201 # 201 Created status
 
@@ -77,6 +88,220 @@ def api_add_client():
         # Collect validation errors
         errors = [f"{field}: {', '.join(error_list)}" for field, error_list in form.errors.items()]
         return jsonify({'message': f"Validation failed: {'; '.join(errors)}"}), 400
+    
+@bp.route('/admin/clients/<int:user_id>', methods=['PUT']) # Using PUT as it's an update
+@login_required
+def update_client_details(user_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    client = User.query.options(joinedload(User.profile)).filter(
+        User.id == user_id, User.role == 'client'
+    ).first()
+
+    if not client or not client.profile:
+        return jsonify({"message": "Client or profile not found"}), 404
+
+    data = request.json
+    if not data:
+        return jsonify({"message": "No input data provided"}), 400
+
+    # Use EditClientForm fields as a guide
+    profile = client.profile
+    profile.full_name = data.get('full_name', profile.full_name)
+    profile.phone_number = data.get('phone_number', profile.phone_number)
+    profile.address = data.get('address', profile.address)
+    profile.service_frequency = data.get('service_frequency', profile.service_frequency)
+    # Handle service_fee carefully - it might come as a string or number
+    service_fee_input = data.get('service_fee', profile.service_fee)
+    try:
+         profile.service_fee = float(service_fee_input) if service_fee_input not in [None, ''] else None
+    except (ValueError, TypeError):
+         profile.service_fee = profile.service_fee # Keep old value on conversion error
+
+    profile.notes = data.get('notes', profile.notes) # Assuming notes field
+
+    try:
+        db.session.commit()
+        log_activity('Client Updated (API)', f"Admin '{current_user.email}' updated profile for {client.email}")
+
+         # Fetch updated data to return
+        updated_data = get_client_details(user_id).get_json()
+
+        return jsonify({
+            "message": "Client profile updated successfully.",
+            "client": updated_data
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating client via API (User ID: {user_id}): {e}")
+        return jsonify({'message': f'Database error occurred: {e}'}), 500
+    
+@bp.route('/admin/dashboard-stats', methods=['GET'])
+@login_required
+def get_dashboard_stats():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        today = date.today()
+        # These queries match the logic previously in admin.py's dashboard route
+        new_quotes_count = SpecializedQuoteRequest.query.filter_by(status='New').count() # Counts new specialized requests
+        upcoming_cleans_count = Job.query.filter(
+            Job.scheduled_date >= today,
+            Job.status.in_(['Scheduled', 'In-Progress']) # Counts jobs scheduled for today or later that are not completed/cancelled
+        ).count()
+        active_clients_count = User.query.filter_by(role='client').count() # Counts all users with role 'client'
+        staff_members_count = User.query.filter_by(role='staff').count() # Counts all users with role 'staff'
+
+        stats_data = {
+            "new_quotes_count": new_quotes_count,
+            "upcoming_cleans_count": upcoming_cleans_count,
+            "active_clients_count": active_clients_count,
+            "staff_members_count": staff_members_count
+        }
+        return jsonify(stats_data)
+    except Exception as e:
+        print(f"Error fetching dashboard stats: {e}") # Log error server-side
+        return jsonify({"message": "Error fetching dashboard statistics."}), 500
+    
+@bp.route('/admin/staff/<int:user_id>', methods=['GET'])
+@login_required
+def get_staff_details(user_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        # Fetch staff member with their profile data
+        staff_member = User.query.options(joinedload(User.profile)).filter(
+            User.id == user_id, User.role == 'staff'
+        ).first()
+
+        if not staff_member:
+            return jsonify({"message": "Staff member not found"}), 404
+
+        # Calculate age if date_of_birth exists
+        age = None
+        if staff_member.profile and staff_member.profile.date_of_birth:
+            today = date.today()
+            dob = staff_member.profile.date_of_birth
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+        # Prepare profile data, handling potential None values
+        profile_data = {}
+        if staff_member.profile:
+            profile_data = {
+                "full_name": staff_member.profile.full_name or 'N/A',
+                "phone_number": staff_member.profile.phone_number or 'N/A',
+                "address": staff_member.profile.address or 'N/A',
+                "profile_image": staff_member.profile.profile_image or 'avatar_picture_profile_user_icon.png',
+                "id_number": staff_member.profile.id_number or 'N/A',
+                "date_of_birth": staff_member.profile.date_of_birth.strftime('%d %B %Y') if staff_member.profile.date_of_birth else 'N/A',
+                "age": age,
+                "strengths": staff_member.profile.strengths or '',
+                "notes": staff_member.profile.notes or '',
+                "documents": staff_member.profile.documents or [], # Ensure it's a list
+                "has_id_copy": staff_member.profile.has_id_copy or False,
+                "has_drivers_license": staff_member.profile.has_drivers_license or False,
+                "has_criminal_check": staff_member.profile.has_criminal_check or False,
+                # Add banking details if needed later
+            }
+        else: # Default if profile is missing
+             profile_data = {
+                "full_name": 'N/A', "phone_number": 'N/A', "address": 'N/A', "profile_image": 'avatar_picture_profile_user_icon.png',
+                "id_number": 'N/A', "date_of_birth": 'N/A', "age": None, "strengths": '', "notes": '', "documents": [],
+                "has_id_copy": False, "has_drivers_license": False, "has_criminal_check": False
+             }
+
+        staff_data = {
+            "id": staff_member.id,
+            "email": staff_member.email,
+            "profile": profile_data,
+            # Add job history or other relevant data if needed
+        }
+        return jsonify(staff_data)
+
+    except Exception as e:
+        print(f"Error fetching staff details for ID {user_id}: {e}")
+        return jsonify({"message": "Error fetching staff data."}), 500
+    
+@bp.route('/admin/staff/<int:user_id>', methods=['PUT', 'POST'])
+@login_required
+def update_staff_details(user_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    staff_member = User.query.options(joinedload(User.profile)).filter(
+        User.id == user_id, User.role == 'staff'
+    ).first()
+
+    if not staff_member or not staff_member.profile:
+        return jsonify({"message": "Staff member or profile not found"}), 404
+
+    # Use request.form for text fields when using multipart/form-data
+    # Use EditStaffForm fields as a guide for expected data
+    profile = staff_member.profile
+    profile.full_name = request.form.get('full_name', profile.full_name)
+    profile.phone_number = request.form.get('phone_number', profile.phone_number)
+    profile.address = request.form.get('address', profile.address)
+    profile.id_number = request.form.get('id_number', profile.id_number)
+    profile.strengths = request.form.get('strengths', profile.strengths)
+    profile.notes = request.form.get('notes', profile.notes) # Assuming notes field exists
+
+    # Handle boolean checkboxes (value will be 'true' or 'false' string from FormData)
+    profile.has_id_copy = request.form.get('has_id_copy') == 'true'
+    profile.has_drivers_license = request.form.get('has_drivers_license') == 'true'
+    profile.has_criminal_check = request.form.get('has_criminal_check') == 'true'
+
+    try:
+        # --- Handle Profile Picture Upload ---
+        if 'profile_image' in request.files:
+            file = request.files['profile_image']
+            if file and file.filename != '':
+                # Consider adding ALLOWED_EXTENSIONS check from config.py if needed
+                filename = secure_filename(file.filename)
+                unique_filename = str(uuid.uuid4()) + "_" + filename
+                upload_path = os.path.join(current_app.config['UPLOAD_FOLDER'], unique_filename)
+                # TODO: Delete old profile image file if replacing
+                file.save(upload_path)
+                profile.profile_image = unique_filename
+                print(f"Profile image saved to: {upload_path}")
+
+        # --- Handle Document Uploads ---
+        if 'upload_documents' in request.files:
+            uploaded_files = request.files.getlist('upload_documents')
+            new_filenames = []
+            if profile.documents is None: # Initialize if null
+                profile.documents = []
+
+            for file in uploaded_files:
+                if file and file.filename != '':
+                    filename = secure_filename(file.filename)
+                    unique_filename = str(uuid.uuid4()) + "_" + filename
+                    file.save(os.path.join(current_app.config['UPLOAD_FOLDER'], unique_filename))
+                    new_filenames.append(unique_filename)
+
+            if new_filenames:
+                # Append new documents to existing list
+                profile.documents.extend(new_filenames)
+                flag_modified(profile, "documents") # Mark JSON field as modified for SQLAlchemy
+
+        db.session.commit()
+        log_activity('Staff Updated (API)', f"Admin '{current_user.email}' updated profile for {staff_member.email}")
+
+        # Fetch updated data to return (optional but good for UI sync)
+        updated_data = get_staff_details(user_id).get_json() # Reuse the GET endpoint logic
+
+        return jsonify({
+            "message": "Staff profile updated successfully.",
+            "staffMember": updated_data # Return updated data
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating staff via API (User ID: {user_id}): {e}")
+        return jsonify({'message': f'Database error occurred: {e}'}), 500
 
 @bp.route('/admin/staff', methods=['POST'])
 @login_required
@@ -182,6 +407,7 @@ def services():
 @bp.route('/availability/<string:date_str>')
 def availability(date_str):
     # ... (availability implementation) ...
+    from datetime import time, timedelta # Added for clarity, though it might be covered by imports above
     try:
         booking_date = datetime.strptime(date_str, '%Y-%m-%d').date()
     except ValueError:
@@ -215,7 +441,6 @@ def availability(date_str):
 @bp.route('/recent-activity')
 @login_required
 def recent_activity():
-    # ... (recent_activity implementation) ...
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"error": "Permission denied"}), 403
 
@@ -254,6 +479,11 @@ def contact():
 @bp.route('/staff_apply', methods=['POST'])
 def staff_apply():
     # ... (staff_apply implementation) ...
+    import os
+    import uuid
+    from datetime import date # Already imported
+    from werkzeug.utils import secure_filename # Already imported
+    
     try:
         id_number = request.form.get('id_number')
         age = 0 # Placeholder if ID number isn't valid/provided
@@ -316,6 +546,168 @@ def quote():
     flash("Thank you! We've received your quote request.", "success")
     return jsonify({"status": "ok", "message": "Quote request received."})
 
+@bp.route('/admin/jobs/current', methods=['GET'])
+@login_required
+def get_current_jobs():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        # Fetch jobs that are scheduled or in progress
+        # Eagerly load related data for efficiency
+        current_jobs = Job.query.options(
+            joinedload(Job.quote_request).joinedload(QuoteRequest.user).joinedload(User.profile),
+            joinedload(Job.assigned_staff).joinedload(User.profile) # Also load staff profiles
+        ).filter(
+            Job.status.in_(['Scheduled', 'In-Progress'])
+        ).order_by(Job.scheduled_date.asc(), Job.start_time.asc()).all()
+
+        jobs_data = []
+        for job in current_jobs:
+            client_name = "N/A",
+            primary_service = "N/A"
+            if job.quote_request and job.quote_request.user:
+                client_name = job.quote_request.user.profile.full_name or job.quote_request.user.email if job.quote_request.user.profile else job.quote_request.user.email
+                primary_service = job.quote_request.primary_service or "N/A"
+
+            assigned_staff_names = [
+                staff.profile.full_name or staff.email
+                for staff in job.assigned_staff if staff.profile
+            ] or ["None"] # Use ["None"] if list is empty
+
+            jobs_data.append({
+                "id": job.id,
+                "scheduled_date": job.scheduled_date.strftime('%d %b %Y') if job.scheduled_date else 'N/A',
+                "scheduled_date_iso": job.scheduled_date.isoformat() if job.scheduled_date else None, # <-- ADD THIS LINE
+                "start_time": job.start_time.strftime('%H:%M') if job.start_time else '--:--',
+                "client_name": client_name,
+                "service": primary_service,
+                "status": job.status,
+                "assigned_staff": ", ".join(assigned_staff_names)
+            })
+        return jsonify(jobs_data)
+
+    except Exception as e:
+        print(f"Error fetching current jobs: {e}")
+        return jsonify({"message": "Error fetching current job data."}), 500
+
+# --- NEW: API Endpoint for New Confirmed Bookings ---
+@bp.route('/admin/bookings/new', methods=['GET'])
+@login_required
+def get_new_bookings():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        # Fetch QuoteRequests with status 'Confirmed'
+        new_bookings = QuoteRequest.query.options(
+            joinedload(QuoteRequest.user).joinedload(User.profile)
+        ).filter(
+            QuoteRequest.status == 'Confirmed'
+        ).order_by(QuoteRequest.request_date.desc()).all()
+
+        bookings_data = []
+        for req in new_bookings:
+            client_name = "N/A"
+            client_phone = "No phone"
+            if req.user:
+                 client_name = req.user.profile.full_name or req.user.email if req.user.profile else req.user.email
+                 client_phone = req.user.profile.phone_number or "No phone" if req.user.profile else "No phone"
+
+
+            bookings_data.append({
+                "id": req.id,
+                "request_date": req.request_date.strftime('%d %b %Y, %H:%M') if req.request_date else 'N/A',
+                "client_name": client_name,
+                "client_phone": client_phone,
+                "service": req.primary_service or "N/A",
+                "property_type": req.property_type or "N/A",
+                "address": req.address or "N/A", # Assuming address might be added to QuoteRequest
+                "total_price": req.total_price if req.total_price is not None else 'N/A',
+                "user_id": req.user_id # Include user_id if needed for links
+            })
+        return jsonify(bookings_data)
+    except Exception as e:
+        print(f"Error fetching new bookings: {e}")
+        return jsonify({"message": "Error fetching new booking data."}), 500
+
+# --- NEW: API Endpoint for All Quote Requests ---
+@bp.route('/admin/quotes', methods=['GET'])
+@login_required
+def get_all_quotes():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        # Fetch all QuoteRequests, ordered by request date descending
+        # Eagerly load related user and profile data
+        quotes = QuoteRequest.query.options(
+            joinedload(QuoteRequest.user).joinedload(User.profile)
+        ).order_by(QuoteRequest.request_date.desc()).all()
+
+        quotes_data = []
+        for req in quotes:
+            client_name = "N/A"
+            client_phone = "N/A"
+            if req.user:
+                 client_name = req.user.profile.full_name or req.user.email if req.user.profile else req.user.email
+                 client_phone = req.user.profile.phone_number or "N/A" if req.user.profile else "N/A"
+
+            quotes_data.append({
+                "id": req.id,
+                "request_date": req.request_date.strftime('%d %b %Y, %H:%M') if req.request_date else 'N/A',
+                "client_name": client_name,
+                "client_phone": client_phone,
+                "service": req.primary_service or "N/A",
+                "property_type": req.property_type or "N/A",
+                "frequency": req.service_frequency or "N/A", # Assuming service_frequency field exists
+                "address": req.address or "N/A",
+                "total_price": req.total_price if req.total_price is not None else None, # Return as number or null
+                "status": req.status or "Unknown",
+                "user_id": req.user_id # Include user_id if needed for links
+            })
+        return jsonify(quotes_data)
+    except Exception as e:
+        print(f"Error fetching all quotes: {e}") # Log the error
+        return jsonify({"message": "Error fetching quote data."}), 500
+    
+# --- NEW: API Endpoint for All Invoices ---
+@bp.route('/admin/invoices', methods=['GET'])
+@login_required
+def get_all_invoices():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        # Fetch all Invoices, ordered by issue date descending
+        # Eagerly load related user and profile data via the client relationship
+        # Assuming Invoice model has a relationship like client = db.relationship('User', backref='invoices')
+        invoices = Invoice.query.options(
+            joinedload(Invoice.client).joinedload(User.profile)
+        ).order_by(Invoice.invoice_date.desc()).all()
+
+        invoices_data = []
+        for inv in invoices:
+            client_name = "N/A"
+            if inv.client:
+                 client_name = inv.client.profile.full_name or inv.client.email if inv.client.profile else inv.client.email
+
+            invoices_data.append({
+                "id": inv.id,
+                "invoice_number": inv.invoice_number or f"INV-{inv.id}", # Generate if missing
+                "client_name": client_name,
+                "client_id": inv.client_id,
+                "issue_date": inv.invoice_date.strftime('%d %b %Y') if inv.invoice_date else 'N/A',
+                "due_date": inv.due_date.strftime('%d %b %Y') if inv.due_date else 'N/A',
+                "total_amount": inv.total_amount if inv.total_amount is not None else None, # Return as number or null
+                "status": inv.status or "Unknown" # e.g., 'Paid', 'Unpaid', 'Overdue'
+            })
+        return jsonify(invoices_data)
+    except Exception as e:
+    # Print the exception AND the full traceback
+        print(f"Error fetching all invoices: {e}") 
+    traceback.print_exc() # <--- ADD THIS LINE
+    return jsonify({"message": "Error fetching invoice data."}), 500
 
 @bp.route('/create_booking', methods=['POST'])
 def create_booking():
@@ -357,6 +749,8 @@ def create_booking():
 @bp.route('/initialize-payment', methods=['POST'])
 def initialize_payment():
     # ... (initialize_payment implementation) ...
+    import os # Added for clarity
+    
     try:
         data = request.json
         payload = {
@@ -379,6 +773,62 @@ def initialize_payment():
     except Exception as e:
         return jsonify({'error': f'An internal server error occurred: {e}'}), 500
     
+@bp.route('/admin/clients/<int:user_id>', methods=['GET'])
+@login_required
+def get_client_details(user_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        # Fetch client with their profile data efficiently
+        client = User.query.options(joinedload(User.profile)).filter(
+            User.id == user_id, User.role == 'client'
+        ).first()
+
+        if not client:
+            return jsonify({"message": "Client not found"}), 404
+
+        # Prepare profile data, handling potential None values
+        profile_data = {}
+        if client.profile:
+            profile_data = {
+                "full_name": client.profile.full_name or 'N/A',
+                "phone_number": client.profile.phone_number or 'N/A',
+                "address": client.profile.address or 'N/A',
+                "service_frequency": client.profile.service_frequency or 'N/A',
+                "service_fee": client.profile.service_fee, # Keep as number or None
+                "notes": client.profile.notes or '' # Default to empty string
+            }
+        else: # Handle case where profile might somehow be missing
+             profile_data = {
+                "full_name": 'N/A', "phone_number": 'N/A', "address": 'N/A',
+                "service_frequency": 'N/A', "service_fee": None, "notes": ''
+             }
+
+
+        # Optional: Fetch related data like booking history (simplified example)
+        # You might want more details or pagination for a large history
+        bookings = QuoteRequest.query.filter_by(user_id=client.id).order_by(QuoteRequest.request_date.desc()).limit(10).all()
+        booking_history = [{
+            "id": b.id,
+            "request_date": b.request_date.strftime('%d %b %Y') if b.request_date else 'N/A',
+            "primary_service": b.primary_service or 'N/A',
+            "status": b.status or 'Unknown',
+            "property_type": b.property_type or 'N/A',
+            "service_frequency": b.service_frequency or 'N/A' # Different from profile frequency
+        } for b in bookings]
+
+        client_data = {
+            "id": client.id,
+            "email": client.email,
+            "profile": profile_data,
+            "booking_history": booking_history # Add booking history
+        }
+        return jsonify(client_data)
+
+    except Exception as e:
+        print(f"Error fetching client details for ID {user_id}: {e}")
+        return jsonify({"message": "Error fetching client data."}), 500
 
 @bp.route('/admin/clients/search')
 @login_required
@@ -411,7 +861,7 @@ def search_clients():
             "email": client.email,
             "phone_number": phone_number,
             "address": address,
-            "view_url": url_for('admin.view_client', user_id=client.id)
+            #"view_url": url_for('admin.view_client', user_id=client.id)
         })
     return jsonify(clients_data)
 
@@ -449,7 +899,31 @@ def search_staff():
             "phone_number": staff.profile.phone_number if staff.profile else 'N/A',
             "profile_image": staff.profile.profile_image if staff.profile else None,
             "age": age,
-            "view_url": url_for('admin.view_staff', user_id=staff.id)
+            #"view_url": url_for('admin.view_staff', user_id=staff.id)
         })
 
     return jsonify(staff_data)
+
+@bp.route('/admin/applications', methods=['GET'])
+@login_required
+def get_staff_applications():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        applications = StaffApplication.query.order_by(StaffApplication.submission_date.desc()).all()
+        apps_data = []
+        for app in applications:
+            apps_data.append({
+                "id": app.id,
+                "submission_date": app.submission_date.strftime('%d %b %Y, %H:%M') if app.submission_date else 'N/A', # Format date
+                "full_name": app.full_name,
+                "id_number": app.id_number or 'N/A',
+                "email": app.email,
+                "phone_number": app.phone_number,
+                "document_filenames": app.document_filenames or [] # Return list or empty list
+            })
+        return jsonify(apps_data)
+    except Exception as e:
+        print(f"Error fetching staff applications: {e}")
+        return jsonify({"message": "Error fetching application data."}), 500

@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-// Import useNavigate for redirection after delete
 import { useParams, Link, useNavigate } from 'react-router-dom';
 
 // Simple inline confirmation modal component
@@ -158,7 +157,7 @@ function ClientDetail() {
         <h1>{client.profile?.full_name || client.email}</h1>
         <div>
           <Link to="/clients" className="cta-outline">← Back to Client List</Link>
-          <button className="cta" disabled style={{ marginLeft: '10px' }}>Edit Details</button>
+          <Link to={`/client/edit/${clientId}`} className="cta" style={{ marginLeft: '10px' }}>Edit Details</Link>
         </div>
       </div>
 

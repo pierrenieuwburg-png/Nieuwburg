@@ -126,7 +126,8 @@ class Invoice(db.Model):
     discount_value = db.Column(db.Float, default=0.0)
     discount_type = db.Column(db.String(10), default='R')
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    line_items = db.relationship('InvoiceLineItem', backref='invoice', lazy=True, cascade="all, delete-orphan")
+    client = db.relationship('User', overlaps="invoices,user")
+    line_items = db.relationship('InvoiceLineItem', backref='invoice_list', lazy=True, cascade="all, delete-orphan")
 
 class InvoiceLineItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)

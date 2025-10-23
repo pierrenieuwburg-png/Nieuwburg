@@ -74,7 +74,7 @@ def placement_apply(service_type):
 @login_required
 def client_dashboard():
     if current_user.role == 'admin':
-        return redirect(url_for('admin.dashboard'))
+        return redirect(url_for('admin.admin_spa_shell'))
     if current_user.role == 'staff':
         return redirect(url_for('main.staff_dashboard'))
 

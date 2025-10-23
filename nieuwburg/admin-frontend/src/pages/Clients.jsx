@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
-// Add useLocation hook
 import { Link, useLocation } from 'react-router-dom';
 import AddClientModal from '../components/AddClientModal';
 
 function Clients() {
-  const location = useLocation(); // Hook to get navigation state
   const [clients, setClients] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  // Initialize flashMessage from location state
+  const location = useLocation(); // Hook to get navigation state
   const [flashMessage, setFlashMessage] = useState(location.state?.flashMessage || null);
 
   // Clear flash message from location state after reading it
