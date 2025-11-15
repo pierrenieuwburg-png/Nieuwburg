@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, current_app, flash, url_for
+from flask import Blueprint, jsonify, request, current_app, flash, render_template, redirect, url_for, flash, Response
 from flask_login import current_user, login_required
 from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
@@ -10,19 +10,33 @@ import pytz
 import os
 import uuid
 import traceback
+from ..forms import GuestQuoteForm
+from ..models import QuoteLineItem, User
+from .utils import get_next_quote_number, log_activity, send_async_email
+from markupsafe import escape, Markup
 from werkzeug.utils import secure_filename
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from .. import db
-from ..models import (Post, ServiceCategory, ServiceItem, Job, User, Profile,
-                     QuoteRequest, StaffApplication, SpecializedQuoteRequest, ActivityLog, Invoice)
+from ..models import (Post, ServiceCategory, ServiceItem, Job, User, Profile, 
+                      QuoteRequest, Quote, StaffApplication, QuoteLineItem, 
+                      ActivityLog, Invoice, BusinessSettings, ServiceClause)
+
 from ..forms import AddClientForm, AddStaffForm, EditStaffForm, EditClientForm
 from .auth import generate_confirmation_token
 from .. import mail
 from flask_mail import Message
-from .utils import log_activity, send_async_email # Keep existing utils import
+from .utils import render_template_to_pdf, send_email_with_attachment
 
 
 bp = Blueprint('api', __name__, url_prefix='/api')
+
+def nl2br(value):
+    """Converts newlines in text to HTML <br> tags."""
+    if value is None:
+        return ''
+    escaped_value = escape(str(value)) 
+    result = escaped_value.replace('\r\n', '<br>\n').replace('\n', '<br>\n')
+    return Markup(result)
 
 # --- Add Client API Route ---
 @bp.route('/admin/clients', methods=['POST'])
@@ -44,14 +58,13 @@ def api_add_client():
             new_client = User(
                 email=form.email.data,
                 role='client',
-                is_confirmed=True # Admins create confirmed clients
+                is_confirmed=True
             )
-            # Set a default secure password (user can reset later if needed)
             temp_password = secrets.token_urlsafe(12)
             new_client.set_password(temp_password)
 
             new_profile = Profile(
-                user=new_client, # Associate profile with user
+                user=new_client,
                 full_name=form.full_name.data,
                 phone_number=form.phone_number.data,
                 address=form.address.data
@@ -147,7 +160,7 @@ def get_dashboard_stats():
     try:
         today = date.today()
         # These queries match the logic previously in admin.py's dashboard route
-        new_quotes_count = SpecializedQuoteRequest.query.filter_by(status='New').count() # Counts new specialized requests
+        new_quotes_count = QuoteRequest.query.filter_by(status='New').count() # Counts new specialized requests
         upcoming_cleans_count = Job.query.filter(
             Job.scheduled_date >= today,
             Job.status.in_(['Scheduled', 'In-Progress']) # Counts jobs scheduled for today or later that are not completed/cancelled
@@ -166,6 +179,785 @@ def get_dashboard_stats():
         print(f"Error fetching dashboard stats: {e}") # Log error server-side
         return jsonify({"message": "Error fetching dashboard statistics."}), 500
     
+@bp.route('/admin/jobs/by_date/<string:date_str>', methods=['GET'])
+@login_required
+def get_jobs_by_date(date_str):
+    """
+    Fetches all jobs scheduled for a specific date.
+    """
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"message": "Invalid date format. Use YYYY-MM-DD."}), 400
+
+    try:
+        # Query jobs, joining client/staff profiles and the quote request
+        jobs_on_date = Job.query.options(
+            joinedload(Job.client).joinedload(User.profile),
+            joinedload(Job.assigned_staff).joinedload(User.profile),
+            joinedload(Job.quote_request) # Load the related quote request
+        ).filter(
+            Job.scheduled_date == target_date
+        ).order_by(Job.start_time.asc()).all()
+
+        jobs_data = []
+        for job in jobs_on_date:
+            client_name = "N/A"
+            if job.client and job.client.profile:
+                client_name = job.client.profile.full_name or job.client.email
+            elif job.client:
+                 client_name = job.client.email
+
+            # --- Get service name from the quote_request ---
+            service_name = job.quote_request.primary_service if job.quote_request else "N/A"
+            # ---
+
+            staff_names = ", ".join(
+                # Safely access profile name
+                [staff.profile.full_name for staff in job.assigned_staff if staff.profile and staff.profile.full_name]
+            ) or 'N/A'
+
+            jobs_data.append({
+                "id": job.id,
+                "client_name": client_name,
+                "service_name": service_name, # Use name via quote_request
+                "start_time": job.start_time.strftime('%H:%M') if job.start_time else '--:--',
+                "assigned_staff": staff_names,
+                "status": job.status
+            })
+
+        return jsonify(jobs_data)
+
+    except Exception as e:
+        print(f"Error fetching jobs for date {date_str}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+    
+@bp.route('/admin/quotes/<int:quote_id>', methods=['GET'])
+@login_required
+def get_quote_detail(quote_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        quote = db.session.get(QuoteRequest, quote_id)
+        if not quote:
+            return jsonify({"message": "Quote request not found"}), 404
+
+        # Convert to SAST for display
+        sast_timezone = pytz.timezone('Africa/Johannesburg')
+        formatted_date = 'N/A'
+        if quote.request_date:
+            utc_dt = pytz.utc.localize(quote.request_date)
+            sast_dt = utc_dt.astimezone(sast_timezone)
+            formatted_date = sast_dt.strftime('%d %b %Y, %H:%M')
+
+        client_data = {
+            "name": quote.name or 'N/A',
+            "email": quote.email or 'N/A',
+            "phone": quote.phone or 'N/A',
+            "address": quote.address or 'Not provided',
+            "user_id": quote.user_id # For linking to client detail page
+        }
+
+        request_data = {
+            "id": quote.id,
+            "submitted_on": formatted_date,
+            "status": quote.status or 'Unknown',
+            "subject": quote.subject or 'N/A',
+            "associated_email": quote.user.email if quote.user else 'No associated account',
+            "full_description": quote.description or 'No description provided.'
+        }
+
+        return jsonify({
+            "client": client_data,
+            "request": request_data
+        })
+    
+    except Exception as e:
+        print(f"Error fetching quote detail {quote_id}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+    
+@bp.route('/admin/quotes/formal/<int:quote_id>', methods=['GET'])
+@login_required
+def get_formal_quote_detail(quote_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        quote = db.session.get(Quote, quote_id)
+        if not quote:
+            return jsonify({"message": "Formal quote not found"}), 404
+            
+        # Get Client Info
+        client_data = {
+            "name": "N/A", "email": "N/A", "phone": "N/A", "address": "N/A",
+            "user_id": quote.user_id
+        }
+        if quote.user:
+            if quote.user.profile:
+                client_data["name"] = quote.user.profile.full_name or quote.user.email
+                client_data["email"] = quote.user.email
+                client_data["phone"] = quote.user.profile.phone_number
+                client_data["address"] = quote.user.profile.address
+            else:
+                client_data["name"] = quote.user.email
+                client_data["email"] = quote.user.email
+        elif quote.guest_name:
+            client_data["name"] = quote.guest_name
+            client_data["email"] = quote.guest_email
+            client_data["phone"] = quote.guest_phone
+            client_data["address"] = quote.guest_address
+
+        # Get Quote Info
+        quote_data = {
+            "id": quote.id, "quote_number": quote.quote_number,
+            "quote_date": quote.quote_date.strftime('%d %b %Y') if quote.quote_date else 'N/A',
+            "expiry_date": quote.expiry_date.strftime('%d %b %Y') if quote.expiry_date else 'N/A',
+            "status": quote.status, "subtotal": quote.subtotal,
+            "discount": quote.discount_value, "total": quote.total
+        }
+        
+        # Get Line Items
+        line_items = QuoteLineItem.query.filter_by(quote_id=quote_id).all()
+        items_data = [{
+            "id": item.id, "description": item.description, "quantity": item.quantity,
+            "unit_price": item.unit_price, "amount": item.amount
+        } for item in line_items]
+
+        return jsonify({
+            "client": client_data,
+            "quote": quote_data,
+            "line_items": items_data
+        })
+    
+    except Exception as e:
+        print(f"Error fetching formal quote detail {quote_id}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+    
+@bp.route('/admin/quotes/<int:quote_id>', methods=['PUT'])
+@login_required
+def api_update_quote(quote_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    # Find the existing quote
+    quote = db.session.get(Quote, quote_id)
+    if not quote:
+        return jsonify({"message": "Quote not found"}), 404
+
+    # --- Check for edit permissions ---
+    if quote.status != 'Draft':
+        return jsonify({
+            "message": f"Quote is in '{quote.status}' status and can no longer be edited."
+        }), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"message": "No data provided."}), 400
+
+    line_items = data.get('line_items', [])
+    if not line_items:
+         return jsonify({"message": "At least one line item is required."}), 400
+
+    try:
+        # --- 1. Update the Quote object ---
+        quote.user_id = data.get('client_id')
+        quote.guest_name = data.get('guest_name')
+        quote.guest_email = data.get('email')
+        quote.guest_phone = data.get('phone_number')
+        quote.guest_address = data.get('address')
+        
+        quote.subtotal = data.get('subtotal')
+        quote.discount_value = data.get('discount')
+        quote.total = data.get('total')
+        
+        # --- 2. Delete old line items ---
+        QuoteLineItem.query.filter_by(quote_id=quote_id).delete()
+
+        # --- 3. Add new line items ---
+        for item in line_items:
+            line_item = QuoteLineItem(
+                quote_id=quote.id,
+                description=item.get('description'),
+                quantity=float(item.get('quantity', 0)),
+                unit_price=float(item.get('unit_price', 0)),
+                amount=(float(item.get('quantity', 0)) * float(item.get('unit_price', 0)))
+            )
+            db.session.add(line_item)
+
+        # --- 4. Log and Commit ---
+        log_activity(
+            'Quote Updated',
+            f"Admin '{current_user.email}' updated quote {quote.quote_number}."
+        )
+        db.session.commit()
+        
+        return jsonify({
+            "message": f"Quote {quote.quote_number} updated successfully!",
+            "quote_id": quote.id
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating quote: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+    
+@bp.route('/admin/business-settings', methods=['GET'])
+@login_required
+def get_business_settings():
+    """
+    Provides the 'locked' business settings for display on quotes/invoices.
+    """
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        settings = {
+            "business_name": "Nieuwburg Blitz",
+            "business_address": "24 A 5, Parow Park, Balfour Street, Cape Town, 7500",
+            "registration_number": "2025/123456/07",
+            "terms_and_conditions": (
+                "1. All payments are due within 30 days of the invoice date.\n"
+                "2. A 10% late fee will be applied to all overdue accounts.\n"
+                "3. Cancellations must be made at least 48 hours prior to the scheduled service time.\n"
+                "4. Nieuwburg Blitz is not responsible for pre-existing damage.\n"
+                "5. All services are considered accepted upon completion unless a complaint is filed within 24 hours."
+            )
+        }
+        return jsonify(settings)
+
+    except Exception as e:
+        print(f"Error fetching business settings: {e}")
+        return jsonify({"message": "Could not load business settings."}), 500
+    
+@bp.route('/admin/business-settings', methods=['GET', 'PUT'])
+@login_required
+def api_business_settings():
+    """
+    Handles fetching and updating the global business settings.
+    """
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    settings = BusinessSettings.get_settings() # Use our helper
+
+    if request.method == 'PUT':
+        data = request.get_json()
+        if not data:
+            return jsonify({"message": "No data provided"}), 400
+        
+        try:
+            settings.business_name = data.get('business_name', settings.business_name)
+            settings.business_address = data.get('business_address', settings.business_address)
+            settings.registration_number = data.get('registration_number', settings.registration_number)
+            settings.default_terms = data.get('default_terms', settings.default_terms)
+            
+            db.session.commit()
+            log_activity('Settings Updated', f"Admin '{current_user.email}' updated business settings.")
+            
+            return jsonify({
+                "message": "Business settings updated successfully!",
+                "settings": {
+                    "business_name": settings.business_name,
+                    "business_address": settings.business_address,
+                    "registration_number": settings.registration_number,
+                    "default_terms": settings.default_terms
+                }
+            })
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error updating settings: {e}")
+            return jsonify({"message": f"An error occurred: {str(e)}"}), 500
+
+    # --- GET Request ---
+    return jsonify({
+        "business_name": settings.business_name,
+        "business_address": settings.business_address,
+        "registration_number": settings.registration_number,
+        "default_terms": settings.default_terms
+    })
+    
+@bp.route('/admin/quotes/download/<int:item_id>', methods=['GET'])
+@login_required
+def api_download_quote(item_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    item_type = request.args.get('type')
+    logo_path = os.path.join(current_app.root_path, 'static', 'img', 'LogoBlackWithTitle.png')
+
+    try:
+        filename = "document.pdf"
+        pdf_data = None
+
+        if item_type == 'request':
+            # --- Download PDF for a QuoteRequest (Lead) ---
+            # Eagerly load the user and profile for the template
+            quote_req = db.session.query(QuoteRequest).options(
+                joinedload(QuoteRequest.user).joinedload(User.profile)
+            ).filter_by(id=item_id).first()
+            
+            if not quote_req:
+                return "Quote Request not found", 404
+            
+            pdf_data = render_template_to_pdf(
+                'public/quote_pdf_template.html', 
+                quote=quote_req,
+                logo_url=logo_path
+            )
+            filename = f"Quote_Request_{quote_req.id}.pdf"
+
+        elif item_type == 'quote':
+            # --- Download PDF for a Formal Quote ---
+            
+            # --- THIS IS THE FIX ---
+            # Eagerly load line_items AND the user/profile
+            quote = db.session.query(Quote).options(
+                joinedload(Quote.line_items),
+                joinedload(Quote.user).joinedload(User.profile)
+            ).filter_by(id=item_id).first()
+            # --- END OF FIX ---
+            
+            if not quote:
+                return "Formal Quote not found", 404
+            
+            pdf_data = render_template_to_pdf(
+                'public/quote_pdf_template.html', 
+                quote=quote,
+                logo_url=logo_path
+            )
+            filename = f"Quote_{quote.quote_number}.pdf"
+        
+        else:
+            return "Invalid item type provided.", 400
+
+        # Return as an attachment
+        return Response(
+            pdf_data,
+            mimetype='application/pdf',
+            headers={'Content-Disposition': f'attachment;filename={filename}'}
+        )
+
+    except Exception as e:
+        print(f"Error generating PDF for item {item_id} (type: {item_type}): {e}")
+        traceback.print_exc()
+        return "An internal server error occurred.", 500
+    
+@bp.route('/admin/quotes/<int:quote_id>/send', methods=['POST'])
+@login_required
+def api_send_quote(quote_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    # Check for CSRF token from the header (sent by React)
+    csrf_token = request.headers.get('X-CSRFToken')
+    if not csrf_token:
+        return jsonify({"message": "CSRF token missing"}), 400
+
+    quote = db.session.get(QuoteRequest, quote_id)
+    if not quote:
+        return jsonify({"message": "Quote not found"}), 404
+
+    # Prevent re-sending quotes that are already finalized
+    if quote.status in ['Accepted', 'Rejected']:
+        return jsonify({"message": f"Quote is already {quote.status} and cannot be sent."}), 400
+
+    # Ensure we have an email to send to
+    recipient_email = quote.email
+    if not recipient_email and quote.user and quote.user.email:
+        recipient_email = quote.user.email
+
+    if not recipient_email:
+        return jsonify({"message": "Cannot send quote: No email address found for this client."}), 400
+
+    try:
+        # 1. Generate PDF in memory
+        pdf_data = render_template_to_pdf(
+            'public/quote_pdf_template.html', 
+            quote=quote
+        )
+
+        # 2. Generate email content
+        token = quote.get_quote_token()
+        email_html = render_template(
+            'email/quote_ready.html', 
+            quote=quote, 
+            token=token
+        )
+
+        # 3. Send the email with PDF attachment
+        pdf_filename = f"Quote_{quote.quote_number}.pdf"
+        send_email_with_attachment(
+            subject=f"Your Quote from Nieuwburg Blitz ({quote.quote_number})",
+            recipients=[recipient_email],
+            html_body=email_html,
+            attachment_data=pdf_data,
+            attachment_filename=pdf_filename,
+            attachment_mimetype='application/pdf'
+        )
+
+        # 4. Update status and log
+        quote.status = 'Sent'
+        log_activity(
+            'Quote Sent', 
+            f"Admin '{current_user.email}' sent quote {quote.quote_number} to {recipient_email}."
+        )
+        db.session.commit()
+
+        return jsonify({
+            "message": f"Quote {quote.quote_number} successfully sent to {recipient_email}.",
+            "new_status": "Sent"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error sending quote {quote_id}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+    
+@bp.route('/admin/quotes/<int:item_id>', methods=['DELETE'])
+@login_required
+def api_delete_quote(item_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    csrf_token = request.headers.get('X-CSRFToken')
+    if not csrf_token:
+        return jsonify({"message": "CSRF token missing"}), 400
+
+    # Get the 'type' from the query string (e.g., ?type=request or ?type=quote)
+    item_type = request.args.get('type')
+    
+    try:
+        if item_type == 'request':
+            # --- Delete a QuoteRequest (a lead) ---
+            quote_req = db.session.get(QuoteRequest, item_id)
+            if not quote_req:
+                return jsonify({"message": "Quote Request not found"}), 404
+            
+            item_desc = quote_req.subject or quote_req.name or f"Request #{quote_req.id}"
+            db.session.delete(quote_req)
+            log_activity(
+                'Quote Request Deleted',
+                f"Admin '{current_user.email}' deleted quote request: {item_desc} (ID: {item_id})."
+            )
+            
+        elif item_type == 'quote':
+            # --- Delete a formal Quote (manually created) ---
+            quote = db.session.get(Quote, item_id)
+            if not quote:
+                return jsonify({"message": "Formal Quote not found"}), 404
+            
+            item_desc = quote.quote_number or f"Quote #{quote.id}"
+            
+            # Delete associated line items first
+            QuoteLineItem.query.filter_by(quote_id=item_id).delete()
+            db.session.delete(quote)
+            
+            log_activity(
+                'Quote Deleted',
+                f"Admin '{current_user.email}' deleted quote: {item_desc} (ID: {item_id})."
+            )
+        
+        else:
+            return jsonify({"message": "Invalid item type for deletion."}), 400
+
+        db.session.commit()
+        return jsonify({"message": f"{item_desc.title()} has been deleted."}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting quote item {item_id} (type: {item_type}): {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+    
+@bp.route('/admin/quotes/create', methods=['POST'])
+@login_required
+def api_create_quote():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"message": "No data provided."}), 400
+
+    client_id = data.get('client_id')
+    guest_name = data.get('guest_name')
+    line_items = data.get('line_items', [])
+    
+    client = None
+    
+    # --- 1. Validate Client ---
+    if client_id:
+        client = db.session.get(User, client_id)
+        if not client or client.role != 'client':
+            return jsonify({"message": "Invalid client selected."}), 404
+    elif not guest_name:
+         return jsonify({"message": "Client name is required."}), 400
+    
+    if not line_items:
+         return jsonify({"message": "At least one line item is required."}), 400
+
+    try:
+        # --- 2. Create the correct Quote object ---
+        new_quote = Quote(
+            quote_number=get_next_quote_number(),
+            user_id=client_id,
+            guest_name=guest_name if not client else None,
+            guest_email=client.email if client and not client_id else (data.get('email') if not client_id else None),
+            guest_phone=client.profile.phone_number if client and client.profile and not client_id else (data.get('phone_number') if not client_id else None),
+            guest_address=client.profile.address if client and client.profile and not client_id else (data.get('address') if not client_id else None),
+            
+            subtotal=data.get('subtotal'),
+            discount_value=data.get('discount'),
+            total=data.get('total'),
+            
+            status='Draft', # Start as Draft
+            quote_date=date.today(),
+            expiry_date=date.today() + timedelta(days=30)
+        )
+        
+        db.session.add(new_quote)
+        db.session.flush()  # Get the new_quote.id
+
+        # --- 3. Create Line Items with the correct 'quote_id' ---
+        for item in line_items:
+            line_item = QuoteLineItem(
+                quote_id=new_quote.id, # <--- THIS IS THE FIX
+                description=item.get('description'),
+                quantity=float(item.get('quantity', 0)),
+                unit_price=float(item.get('unit_price', 0)),
+                amount=(float(item.get('quantity', 0)) * float(item.get('unit_price', 0)))
+            )
+            db.session.add(line_item)
+
+        # --- 4. Log and Commit ---
+        log_activity(
+            'Quote Created',
+            f"Admin '{current_user.email}' created quote {new_quote.quote_number}."
+        )
+        db.session.commit()
+        
+        return jsonify({
+            "message": f"Quote {new_quote.quote_number} created successfully!",
+            "quote_id": new_quote.id
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error creating quote: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+    
+@bp.route('/admin/jobs/<int:job_id>', methods=['DELETE'])
+@login_required
+def delete_job(job_id):
+    """
+    Deletes a specific job.
+    """
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        job = db.session.get(Job, job_id)
+        if not job:
+            return jsonify({"message": "Job not found."}), 404
+
+        # Revert the associated QuoteRequest status (Confirm 'Confirmed' is correct)
+        if job.quote_request:
+             job.quote_request.status = 'Confirmed' 
+
+        # Safely get client email and job date for logging
+        client_email = job.client.email if job.client else "Unknown Client"
+        job_date = job.scheduled_date
+
+        # Log before deleting
+        log_activity(
+            'Job Deleted',
+            f"Admin '{current_user.email}' deleted job #{job.id} (Client: {client_email}, Date: {job_date})."
+        )
+
+        db.session.delete(job)
+        db.session.commit()
+
+        return jsonify({"message": f"Job #{job_id} deleted successfully."}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting job {job_id}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+
+# --- START PHASE 1B IMPLEMENTATION ---
+
+@bp.route('/admin/jobs/<int:job_id>', methods=['GET'])
+@login_required
+def get_job_details(job_id):
+    """
+    Fetches the details for a single job for the Edit Modal.
+    """
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+    
+    try:
+        job = Job.query.options(
+            joinedload(Job.client).joinedload(User.profile),
+            joinedload(Job.quote_request),
+            joinedload(Job.assigned_staff) # Load assigned staff
+        ).filter(Job.id == job_id).first()
+
+        if not job:
+            return jsonify({"message": "Job not found."}), 404
+        
+        # Determine client and service names
+        client_name = "N/A"
+        if job.client and job.client.profile:
+            client_name = job.client.profile.full_name or job.client.email
+        elif job.client:
+            client_name = job.client.email
+            
+        service_name = job.quote_request.primary_service if job.quote_request else "N/A"
+        
+        # Get the ID of the *first* assigned staff member (to match edit modal's single select)
+        assigned_staff_id = job.assigned_staff[0].id if job.assigned_staff else None
+
+        job_data = {
+            "id": job.id,
+            "client_id": job.client_id,
+            "client_name": client_name,
+            "service_name": service_name,
+            "scheduled_date": job.scheduled_date.isoformat() if job.scheduled_date else None,
+            "start_time": job.start_time.strftime('%H:%M') if job.start_time else None,
+            "assigned_staff_id": assigned_staff_id,
+            "status": job.status,
+            "notes": job.notes or ""
+        }
+        return jsonify(job_data)
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error fetching job details for {job_id}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+
+@bp.route('/admin/jobs/<int:job_id>', methods=['PUT'])
+@login_required
+def update_job_details(job_id):
+    """
+    Updates a job's details from the Edit Modal.
+    """
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    job = Job.query.options(joinedload(Job.assigned_staff)).filter(Job.id == job_id).first()
+    if not job:
+        return jsonify({"message": "Job not found."}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"message": "No data provided."}), 400
+
+    try:
+        # Extract and validate data
+        scheduled_date_str = data.get('scheduled_date')
+        scheduled_time_str = data.get('start_time')
+        staff_id = data.get('staff_id')
+        status = data.get('status')
+        notes = data.get('notes')
+
+        if not all([scheduled_date_str, scheduled_time_str, staff_id, status]):
+             return jsonify({"message": "Missing required fields (Date, Time, Staff, Status)."}), 400
+             
+        # Parse date and time
+        job.scheduled_date = datetime.strptime(scheduled_date_str, '%Y-%m-%d').date()
+        job.start_time = datetime.strptime(scheduled_time_str, '%H:%M').time()
+        
+        # Validate status
+        allowed_statuses = ['Scheduled', 'In Progress', 'Completed', 'Cancelled']
+        if status not in allowed_statuses:
+            return jsonify({"message": "Invalid status value."}), 400
+        job.status = status
+        
+        # Update notes
+        job.notes = notes
+
+        # Update staff assignment (handling single-assignment assumption)
+        new_staff_user = db.session.get(User, staff_id)
+        if not new_staff_user or new_staff_user.role != 'staff':
+            return jsonify({"message": "Invalid staff member selected."}), 404
+            
+        # Clear existing staff and add new one
+        job.assigned_staff.clear()
+        job.assigned_staff.append(new_staff_user)
+
+        # Log activity
+        log_activity(
+            'Job Updated', 
+            f"Admin '{current_user.email}' updated job #{job.id}."
+        )
+        
+        db.session.commit()
+        
+        return jsonify({"message": f"Job #{job.id} updated successfully."}), 200
+
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({"message": f"Invalid data format: {e}. Use YYYY-MM-DD and HH:MM."}), 400
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating job {job_id}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+
+@bp.route('/admin/jobs/update_status/<int:job_id>', methods=['POST'])
+@login_required
+def update_job_status(job_id):
+    """
+    Quick update for a job's status from the table dropdown.
+    """
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    job = db.session.get(Job, job_id)
+    if not job:
+        return jsonify({"message": "Job not found."}), 404
+        
+    data = request.get_json()
+    new_status = data.get('status')
+    
+    if not new_status:
+        return jsonify({"message": "No status provided."}), 400
+
+    allowed_statuses = ['Scheduled', 'In Progress', 'Completed', 'Cancelled']
+    if new_status not in allowed_statuses:
+        return jsonify({"message": "Invalid status value."}), 400
+        
+    try:
+        job.status = new_status
+        
+        log_activity(
+            'Job Status Updated', 
+            f"Admin '{current_user.email}' updated job #{job.id} status to '{new_status}'."
+        )
+        db.session.commit()
+        
+        return jsonify({"message": f"Job #{job.id} status updated to '{new_status}'."}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error quick-updating job status for {job_id}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
+
+# --- END PHASE 1B IMPLEMENTATION ---
+
 @bp.route('/admin/staff/<int:user_id>', methods=['GET'])
 @login_required
 def get_staff_details(user_id):
@@ -370,6 +1162,227 @@ def api_add_staff():
     else:
         errors = [f"{field}: {', '.join(error_list)}" for field, error_list in form.errors.items()]
         return jsonify({'message': f"Validation failed: {'; '.join(errors)}"}), 400
+    
+# --- NEW ENDPOINT: Get all staff for dropdowns ---
+@bp.route('/admin/staff/all', methods=['GET'])
+@login_required
+def api_get_all_staff():
+    """
+    Fetches all staff members for dropdowns in the frontend.
+    Handles cases where staff might not have a profile yet.
+    """
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+    try:
+        # Use left outer join explicitly via options for clarity
+        # Order by User email as a fallback if profile is missing
+        staff_list = User.query.options(joinedload(User.profile)).filter(
+            User.role == 'staff'
+        ).order_by(User.email).all() # Order by email initially
+
+        staff_data = []
+        for staff in staff_list:
+            # --- FIX: Check for profile existence before accessing ---
+            full_name = staff.email # Default to email
+            if staff.profile and staff.profile.full_name:
+                full_name = staff.profile.full_name
+            # --- END FIX ---
+                
+            staff_data.append({
+                "id": staff.id,
+                "full_name": full_name, # Use the determined name
+                "email": staff.email
+            })
+
+        # Optional: Sort by full_name after constructing the list if needed
+        staff_data.sort(key=lambda x: x['full_name'])
+
+        return jsonify(staff_data)
+        
+    except Exception as e:
+        # --- FIX: Log the actual error and return 500 ---
+        print(f"!!! Error in api_get_all_staff: {e}")
+        traceback.print_exc() # Print full traceback to console
+        # Return a more specific error for debugging, but still 500 status
+        return jsonify({"message": f"Internal server error fetching staff list: {str(e)}"}), 500
+        # --- END FIX ---
+
+# --- NEW ENDPOINT: Get all service items for dropdowns ---
+@bp.route('/admin/services/all_items', methods=['GET'])
+@login_required
+def api_get_all_service_items():
+    """
+    Fetches all individual service items for dropdowns in the frontend.
+    """
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+    try:
+        # Assuming your model is ServiceItem as discussed
+        service_items = ServiceItem.query.order_by(ServiceItem.name).all() 
+        
+        items_data = [{
+            "id": item.id,
+            "name": item.name
+            # Add other fields like default price if needed later
+        } for item in service_items]
+        
+        return jsonify(items_data)
+    except Exception as e:
+        print(f"Error fetching all service items: {e}")
+        return jsonify({"message": "Error fetching service item list."}), 500
+
+
+# --- NEW ENDPOINT: Manually Add a Job ---
+@bp.route('/admin/jobs/manual_add', methods=['POST'])
+@login_required
+def api_add_job_manually():
+    """
+    Handles the submission of the 'Add Manual Booking' modal.
+    Creates a client if needed, a QuoteRequest, and a Job.
+    """
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"message": "No data provided."}), 400
+        
+    # --- 1. Extract All Data ---
+    client_id = data.get('client_id') # Will be null if it's a new client
+    save_new_client = data.get('save_new_client', False)
+    
+    # Client details (used if save_new_client is True or if client_id is null)
+    full_name = data.get('full_name')
+    email = data.get('email')
+    phone_number = data.get('phone_number')
+    address = data.get('address') # Address for the booking/new client profile
+
+    # Job details (all required by frontend form)
+    service_item_id = data.get('service_item_id')
+    service_price_str = data.get('service_price') # Comes as string
+    service_frequency = data.get('service_frequency')
+    staff_id = data.get('staff_id')
+    scheduled_date_str = data.get('scheduled_date')
+    scheduled_time_str = data.get('scheduled_time')
+
+    # --- 2. Determine or Create Client ---
+    client = None
+    if client_id:
+        client = db.session.get(User, client_id)
+        if not client or client.role != 'client':
+            return jsonify({"message": "Selected client not found."}), 404
+        # Use provided address for booking, even if existing client selected
+        booking_address = address or (client.profile.address if client.profile else 'N/A')
+    
+    elif save_new_client:
+        if not full_name or not email:
+            return jsonify({"message": "Full Name and Email are required to save a new client."}), 400
+        
+        existing = User.query.filter_by(email=email).first()
+        if existing:
+            return jsonify({"message": f"A user with the email {email} already exists."}), 400
+        
+        try:
+            temp_password = secrets.token_urlsafe(12)
+            new_client = User(email=email, role='client', is_confirmed=True)
+            new_client.set_password(temp_password)
+            
+            new_profile = Profile(
+                user=new_client,
+                full_name=full_name,
+                phone_number=phone_number,
+                address=address # Use the address provided in the form
+            )
+            db.session.add(new_client)
+            db.session.add(new_profile)
+            db.session.commit() # Commit here to get the new client's ID
+            client = new_client
+            booking_address = address # Address for booking is the one just entered
+            log_activity('Client Created (Manual Booking)', f"Admin '{current_user.email}' created client: {email}")
+        
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error creating new client during manual booking: {e}")
+            traceback.print_exc()
+            return jsonify({"message": "Database error creating new client."}), 500
+            
+    else: 
+        # Case: User typed a name/email but didn't select existing client and didn't check 'Save'
+        # We need a client ID to proceed.
+         return jsonify({"message": "Please select an existing client or check 'Save as new client'."}), 400
+
+    # --- 3. Validate Job Details ---
+    if not all([service_item_id, service_price_str, service_frequency, staff_id, scheduled_date_str, scheduled_time_str]):
+         return jsonify({"message": "Missing required job details (Service, Price, Frequency, Staff, Date, Time)."}), 400
+         
+    try:
+        staff_user = db.session.get(User, staff_id)
+        if not staff_user or staff_user.role != 'staff':
+            return jsonify({"message": "Invalid staff member selected."}), 404
+            
+        service_item = db.session.get(ServiceItem, service_item_id)
+        if not service_item:
+            return jsonify({"message": "Invalid service selected."}), 404
+            
+        # Parse date, time, and price carefully
+        parsed_date = datetime.strptime(scheduled_date_str, '%Y-%m-%d').date()
+        parsed_time = datetime.strptime(scheduled_time_str, '%H:%M').time()
+        parsed_price = float(service_price_str) # Convert price string to float
+        
+    except ValueError as e:
+        return jsonify({"message": f"Invalid data format: {e}. Ensure date is YYYY-MM-DD, time is HH:MM, and price is a number."}), 400
+    except Exception as e: # Catch other potential errors
+        return jsonify({"message": f"Error validating job data: {e}"}), 400
+
+    # --- 4. Create Database Records ---
+    try:
+        # a) Create a related 'QuoteRequest' for data consistency
+        #    (even though it wasn't requested by the client)
+        new_quote = QuoteRequest(
+            user_id=client.id,
+            primary_service=service_item.name,
+            property_type="N/A (Manual)", # Indicate it was manually added
+            service_frequency=service_frequency,
+            address=booking_address, # Use the address determined earlier
+            total_price=parsed_price,
+            status='Scheduled' # Mark as scheduled immediately
+        )
+        db.session.add(new_quote)
+        db.session.flush() # Use flush to get the ID before full commit
+        
+        # b) Create the actual 'Job' record
+        new_job = Job(
+            quote_request_id=new_quote.id, # Link to the placeholder quote
+            client_id=client.id,
+            service_id=service_item.id,
+            scheduled_date=parsed_date,
+            start_time=parsed_time,
+            status='Scheduled',
+            notes=f"Job manually created by admin {current_user.email}."
+            # Add price to Job if your model has it, e.g., estimated_price=parsed_price
+        )
+        new_job.assigned_staff.append(staff_user) # Assign staff
+        db.session.add(new_job)
+        
+        # c) Log the activity
+        log_activity(
+            'Manual Job Created', 
+            f"Admin '{current_user.email}' created job #{new_job.id} for {client.email}. Assigned to {staff_user.profile.full_name}."
+        )
+        
+        # d) Commit everything
+        db.session.commit()
+        
+        return jsonify({
+            "message": "Manual job created successfully!",
+            "job_id": new_job.id
+        }), 201 # 201 Created status
+
+    except Exception as e:
+        db.session.rollback() # Rollback all changes if any part fails
+        print(f"Error saving manual job: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal server error occurred while saving the job: {str(e)}"}), 500
 
 @bp.route('/posts')
 def posts():
@@ -458,22 +1471,38 @@ def recent_activity():
 
 @bp.route('/contact', methods=['POST'])
 def contact():
-    # ... (contact implementation) ...
     data = request.json
+    if not data or not data.get('name') or not data.get('email') or not data.get('message'):
+         return jsonify({"status": "error", "message": "Name, Email, and Message are required."}), 400
+         
     try:
-        new_request = SpecializedQuoteRequest(
-            name=data.get('name'), email=data.get('email'), phone=data.get('phone'), 
-            area=data.get('area'), message=data.get('message')
+        # Create a QuoteRequest object instead
+        new_request = QuoteRequest(
+            name=data.get('name'), 
+            email=data.get('email'), 
+            phone=data.get('phone'), 
+            # Map 'area' to 'address' or keep as 'N/A' if distinct
+            address=data.get('area', 'N/A'), # Or create a separate 'area' column if needed
+            description=data.get('message'), # Map 'message' to 'description'
+            subject="Contact Form Submission", # Set a default subject
+            status='Pending', # Use the unified status field
+            request_date=datetime.utcnow() # Set the date
         )
         db.session.add(new_request)
         db.session.commit()
-        log_activity("Specialized Request", f"New site contact form submission from {data.get('name')}.")
-        # Email sending logic would go here
-        return jsonify({"status": "ok", "message": "Thank you! Your request has been sent."})
+        
+        # Update log message if desired
+        log_activity("Contact Form Submission", f"New site contact form submission from {data.get('name')}.") 
+        
+        # Email sending logic could go here if needed for contact form specifically
+        
+        return jsonify({"status": "ok", "message": "Thank you! Your message has been sent."}) # Slightly different message maybe?
+        
     except Exception as e:
         db.session.rollback()
-        print(f"API Contact Error: {e}")
-        return jsonify({"status": "error", "message": "An unexpected error occurred."}), 500
+        current_app.logger.error(f"API Contact Error: {e}") # Use logger
+        traceback.print_exc() # Print traceback
+        return jsonify({"status": "error", "message": "An unexpected error occurred processing your contact request."}), 500
 
 
 @bp.route('/staff_apply', methods=['POST'])
@@ -630,45 +1659,254 @@ def get_new_bookings():
     except Exception as e:
         print(f"Error fetching new bookings: {e}")
         return jsonify({"message": "Error fetching new booking data."}), 500
+    
+@bp.route('/admin/jobs/schedule', methods=['POST'])
+@login_required
+def schedule_new_job_from_quote():
+    if current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
 
-# --- NEW: API Endpoint for All Quote Requests ---
+    data = request.get_json()
+    quote_request_id = data.get('quote_request_id')
+    staff_id = data.get('staff_id')
+    scheduled_date_str = data.get('scheduled_date') # Expecting YYYY-MM-DD
+    scheduled_time_str = data.get('scheduled_time') # Expecting HH:MM
+
+    if not all([quote_request_id, staff_id, scheduled_date_str, scheduled_time_str]):
+        return jsonify({"message": "Missing required fields (Booking ID, Staff, Date, Time)."}), 400
+
+    try:
+        quote = db.session.get(QuoteRequest, quote_request_id)
+        if not quote:
+            return jsonify({"message": "Booking Request not found."}), 404
+        if quote.status != 'Confirmed':
+            return jsonify({"message": "This booking is not confirmed or has already been scheduled."}), 400
+
+        staff_user = db.session.get(User, staff_id)
+        if not staff_user or staff_user.role != 'staff':
+            return jsonify({"message": "Invalid staff member selected."}), 404
+            
+        client = db.session.get(User, quote.user_id)
+        if not client or client.role != 'client':
+            return jsonify({"message": "Associated client account not found."}), 404
+
+        # --- Ensure you query ServiceItem ---
+        service_item = ServiceItem.query.filter_by(name=quote.primary_service).first()
+        if not service_item:
+            print(f"Data Mismatch: Could not find ServiceItem with name '{quote.primary_service}' for QuoteRequest ID {quote.id}")
+            return jsonify({"message": f"Service '{quote.primary_service}' not found in Service list."}), 404
+
+        # --- FIX: Parse date and time separately ---
+        try:
+            parsed_date = datetime.strptime(scheduled_date_str, '%Y-%m-%d').date()
+            parsed_time = datetime.strptime(scheduled_time_str, '%H:%M').time()
+        except ValueError:
+            return jsonify({"message": "Invalid date or time format. Use YYYY-MM-DD and HH:MM."}), 400
+        # --- END FIX ---
+
+        new_job = Job(
+            quote_request_id=quote.id,
+            client_id=client.id,
+            service_id=service_item.id, # Use service_item.id
+            scheduled_date=parsed_date,  # Use parsed date
+            start_time=parsed_time,      # Use parsed time
+            status='Scheduled',
+            notes=f"Job scheduled from QuoteRequest #{quote.id}. Address: {quote.address or 'N/A'}"
+        )
+        
+        new_job.assigned_staff.append(staff_user)
+        quote.status = 'Scheduled' # Update quote status
+        
+        log_entry = ActivityLog(
+            user_id=current_user.id,
+            action=f"Scheduled job for booking #{quote.id}. Assigned to {staff_user.profile.full_name}."
+        )
+
+        db.session.add(new_job)
+        db.session.add(log_entry)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Job scheduled successfully!",
+            "job_id": new_job.id
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error scheduling job from quote: {e}")
+        traceback.print_exc() 
+        return jsonify({"message": f"An internal error occurred: {str(e)}"}), 500
+    
+@bp.route('/admin/bookings/new/<int:quote_id>', methods=['GET'])
+@login_required
+def get_new_booking_detail(quote_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        req = db.session.get(QuoteRequest, quote_id)
+        if not req:
+            return jsonify({"message": "Booking request not found."}), 404
+        
+        # Ensure it's a 'Confirmed' booking
+        if req.status != 'Confirmed':
+             return jsonify({"message": "This booking is not in a 'Confirmed' state."}), 400
+
+        client_name = "N/A"
+        client_phone = "No phone"
+        if req.user:
+            if req.user.profile:
+                client_name = req.user.profile.full_name or req.user.email
+                client_phone = req.user.profile.phone_number or "No phone"
+            else:
+                client_name = req.user.email
+
+        booking_data = {
+            "id": req.id,
+            "request_date": req.request_date.strftime('%d %b %Y, %H:%M') if req.request_date else 'N/A',
+            "client_name": client_name,
+            "client_phone": client_phone,
+            "service": req.primary_service or "N/A",
+            "property_type": req.property_type or "N/A",
+            "address": req.address or "N/A",
+            "total_price": req.total_price if req.total_price is not None else 'N/A',
+            "user_id": req.user_id
+        }
+        return jsonify(booking_data)
+    except Exception as e:
+        print(f"Error fetching new booking detail: {e}")
+        return jsonify({"message": "Error fetching new booking data."}), 500
+    
+@bp.route('/admin/jobs/scheduled', methods=['GET'])
+@login_required
+def get_scheduled_jobs():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        # Fetch all Job records, joining related data we need
+        jobs = Job.query.options(
+            joinedload(Job.client).joinedload(User.profile),
+            joinedload(Job.service),
+            joinedload(Job.assigned_staff).joinedload(User.profile) # Load staff user and their profile
+        ).order_by(Job.scheduled_date.desc()).all()
+
+        jobs_data = []
+        for job in jobs:
+            # Combine staff names
+            staff_names = ", ".join(
+                [staff.profile.full_name for staff in job.assigned_staff if staff.profile]
+            ) or 'N/A'
+
+            jobs_data.append({
+                "id": job.id,
+                "client_name": job.client.profile.full_name if job.client and job.client.profile else 'N/A',
+                "service_name": job.service.name if job.service else 'N/A',
+                "scheduled_date": job.scheduled_date.isoformat() if job.scheduled_date else None,
+                "assigned_staff": staff_names,
+                "status": job.status
+            })
+        return jsonify(jobs_data)
+    except Exception as e:
+        print(f"Error fetching scheduled jobs: {e}")
+        return jsonify({"message": "Error fetching scheduled job data."}), 500
+
 @bp.route('/admin/quotes', methods=['GET'])
 @login_required
 def get_all_quotes():
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
-
     try:
-        # Fetch all QuoteRequests, ordered by request date descending
-        # Eagerly load related user and profile data
-        quotes = QuoteRequest.query.options(
+        combined_list = []
+        sast = pytz.timezone('Africa/Johannesburg') 
+
+        # 1. Get all QuoteRequests (Leads)
+        quote_requests = QuoteRequest.query.options(
             joinedload(QuoteRequest.user).joinedload(User.profile)
-        ).order_by(QuoteRequest.request_date.desc()).all()
+        ).all()
+        
+        for req in quote_requests:
+            formatted_date = 'N/A'
+            if req.request_date:
+                utc_dt = pytz.utc.localize(req.request_date) 
+                sast_dt = utc_dt.astimezone(sast) 
+                formatted_date = sast_dt.strftime('%d %b %Y, %H:%M') 
 
-        quotes_data = []
-        for req in quotes:
-            client_name = "N/A"
-            client_phone = "N/A"
-            if req.user:
-                 client_name = req.user.profile.full_name or req.user.email if req.user.profile else req.user.email
-                 client_phone = req.user.profile.phone_number or "N/A" if req.user.profile else "N/A"
+            client_name = req.name
+            if not client_name and req.user:
+                client_name = req.user.profile.full_name if req.user.profile else req.user.email
 
-            quotes_data.append({
+            client_phone = req.phone
+            if not client_phone and req.user and req.user.profile:
+                client_phone = req.user.profile.phone_number
+
+            combined_list.append({
                 "id": req.id,
-                "request_date": req.request_date.strftime('%d %b %Y, %H:%M') if req.request_date else 'N/A',
-                "client_name": client_name,
-                "client_phone": client_phone,
-                "service": req.primary_service or "N/A",
+                "type": "request", # <-- Identifies this as a request
+                "list_id": f"req_{req.id}", # Unique ID for React key
+                "request_date": formatted_date, 
+                "client_name": client_name or "N/A",
+                "client_phone": client_phone or "N/A",
+                "service": req.subject or req.primary_service or "Specialized Request",
                 "property_type": req.property_type or "N/A",
-                "frequency": req.service_frequency or "N/A", # Assuming service_frequency field exists
-                "address": req.address or "N/A",
-                "total_price": req.total_price if req.total_price is not None else None, # Return as number or null
+                "frequency": req.service_frequency or "N/A",
+                "total_price": req.total_price,
                 "status": req.status or "Unknown",
-                "user_id": req.user_id # Include user_id if needed for links
+                "view_url": f"/quotes/{req.id}", # Links to the React QuoteDetail page
+                "user_id": req.user_id
             })
-        return jsonify(quotes_data)
+
+        # 2. Get all formal Quotes (Manually created)
+        formal_quotes = Quote.query.options(
+            joinedload(Quote.user).joinedload(User.profile)
+        ).all()
+
+        for quote in formal_quotes:
+            formatted_date = 'N/A'
+            if quote.quote_date:
+                # .quote_date is a Date object, not Datetime. No timezone conversion.
+                formatted_date = quote.quote_date.strftime('%d %b %Y')
+
+            client_name = quote.guest_name
+            if not client_name and quote.user:
+                client_name = quote.user.profile.full_name if quote.user.profile else quote.user.email
+            
+            client_phone = quote.guest_phone
+            if not client_phone and quote.user and quote.user.profile:
+                client_phone = quote.user.profile.phone_number
+
+            combined_list.append({
+                "id": quote.id,
+                "type": "quote", # <-- Identifies this as a formal quote
+                "list_id": f"quote_{quote.id}", # Unique ID for React key
+                "request_date": formatted_date, # Use same field name for sorting
+                "client_name": client_name or "N/A",
+                "client_phone": client_phone or "N/A",
+                "service": f"Formal Quote ({quote.quote_number})", # Distinguish it
+                "property_type": "N/A",
+                "frequency": "N/A",
+                "total_price": quote.total, # Use same field name
+                "status": quote.status or "Unknown",
+                "view_url": f"/quotes/formal/{quote.id}", # This view page doesn't exist yet, but we'll add it later
+                "user_id": quote.user_id
+            })
+            
+        # 3. Sort combined list by date (handling mixed datetime/date strings)
+        def sort_key(item):
+            try:
+                # Try parsing as datetime first
+                return datetime.strptime(item['request_date'], '%d %b %Y, %H:%M')
+            except ValueError:
+                # Fallback to parsing as date
+                return datetime.strptime(item['request_date'], '%d %b %Y')
+
+        combined_list.sort(key=sort_key, reverse=True)
+        
+        return jsonify(combined_list)
+        
     except Exception as e:
-        print(f"Error fetching all quotes: {e}") # Log the error
+        print(f"Error fetching all quotes: {e}") 
+        traceback.print_exc() 
         return jsonify({"message": "Error fetching quote data."}), 500
     
 # --- NEW: API Endpoint for All Invoices ---
@@ -708,6 +1946,63 @@ def get_all_invoices():
         print(f"Error fetching all invoices: {e}") 
     traceback.print_exc() # <--- ADD THIS LINE
     return jsonify({"message": "Error fetching invoice data."}), 500
+
+@bp.route('/request-quote', methods=['POST'])
+def request_quote():
+    data = request.get_json()
+    
+    if not data or not all(k in data for k in ['name', 'email', 'phone', 'address', 'description']):
+        return jsonify({'status': 'error', 'message': 'Missing required fields.'}), 400
+
+    try:
+        # Find the category name from its ID
+        category_name = "Specialized Quote (General)"
+
+        new_quote = QuoteRequest()
+
+        # Now, set the attributes individually
+        new_quote.name = data['name'] 
+        new_quote.email = data['email']
+        new_quote.phone = data['phone']
+        new_quote.address = data.get('address')
+        new_quote.service_category_name = category_name 
+        new_quote.description = data['description']
+        new_quote.status = 'Pending'
+        new_quote.request_date = datetime.utcnow()
+        
+        # If the user is logged in, associate the quote with them
+        if current_user.is_authenticated:
+            new_quote.user_id = current_user.id
+            
+        db.session.add(new_quote)
+        db.session.commit()
+
+        admin_email = current_app.config['MAIL_USERNAME']
+        logo_url = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
+        
+        # 1. Render the HTML body HERE in the main request context
+        #    The nl2br filter registered in __init__.py will be found now.
+        html_body_rendered = render_template('email/admin_quote_notification.html', 
+                                             data=data, 
+                                             category_name=category_name, 
+                                             logo_url=logo_url)
+        
+        # 2. Create the Message object using the pre-rendered HTML string
+        msg = Message(subject=f"[Nieuwburg Blitz] New Specialized Quote Request - {data['name']}",
+                      sender=current_app.config['MAIL_USERNAME'],
+                      recipients=[admin_email],
+                      html=html_body_rendered) # <-- Use the rendered string
+        
+        # 3. Pass the app object and the complete message to the async function
+        send_async_email(current_app._get_current_object(), msg)
+        # ------------------------------------------
+        
+        return jsonify({'status': 'ok', 'message': 'Your quote request has been sent! We will be in touch soon.'})
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error processing quote request: {e}")
+        return jsonify({'status': 'error', 'message': 'An internal error occurred. Please try again later.'}), 500
 
 @bp.route('/create_booking', methods=['POST'])
 def create_booking():
@@ -927,3 +2222,109 @@ def get_staff_applications():
     except Exception as e:
         print(f"Error fetching staff applications: {e}")
         return jsonify({"message": "Error fetching application data."}), 500
+    
+@bp.route('/admin/blog/posts', methods=['GET']) # Changed URL to match React
+@login_required
+def get_admin_blog_posts():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    try:
+        # Fetch all posts, ordered by creation date
+        # Eagerly load author and profile for efficiency
+        posts = Post.query.options(
+            joinedload(Post.author).joinedload(User.profile)
+        ).order_by(Post.created_date.desc()).all()
+
+        posts_data = []
+        for post in posts:
+            posts_data.append({
+                "id": post.id,
+                "title": post.title,
+                "author_name": post.author.profile.full_name if post.author and post.author.profile else post.author.email if post.author else 'System',
+                "date_posted": post.created_date.isoformat() if post.created_date else None, # Send ISO format for easier JS parsing
+                "is_published": post.is_published
+                # Add excerpt or other fields if needed by the frontend later
+            })
+        return jsonify(posts_data)
+    except Exception as e:
+        print(f"Error fetching admin blog posts: {e}")
+        return jsonify({"message": "Error fetching blog post data."}), 500
+    
+@bp.route('/admin/service-clauses', methods=['GET'])
+@login_required
+def get_service_clauses():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+    
+    clauses = ServiceClause.query.order_by(ServiceClause.name).all()
+    return jsonify([c.to_dict() for c in clauses])
+
+@bp.route('/admin/service-clauses', methods=['POST'])
+@login_required
+def create_service_clause():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    data = request.get_json()
+    if not data or not data.get('name') or not data.get('text'):
+        return jsonify({"message": "Name and Text are required"}), 400
+        
+    try:
+        new_clause = ServiceClause(
+            name=data['name'],
+            text=data['text']
+        )
+        db.session.add(new_clause)
+        db.session.commit()
+        log_activity('T&C Clause Created', f"Admin '{current_user.email}' created clause: {new_clause.name}")
+        return jsonify(new_clause.to_dict()), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": f"An error occurred: {str(e)}"}), 500
+
+@bp.route('/admin/service-clauses/<int:clause_id>', methods=['PUT'])
+@login_required
+def update_service_clause(clause_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    clause = db.session.get(ServiceClause, clause_id)
+    if not clause:
+        return jsonify({"message": "Clause not found"}), 404
+        
+    data = request.get_json()
+    if not data or not data.get('name') or not data.get('text'):
+        return jsonify({"message": "Name and Text are required"}), 400
+        
+    try:
+        clause.name = data['name']
+        clause.text = data['text']
+        db.session.commit()
+        log_activity('T&C Clause Updated', f"Admin '{current_user.email}' updated clause: {clause.name}")
+        return jsonify(clause.to_dict()), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": f"An error occurred: {str(e)}"}), 500
+
+@bp.route('/admin/service-clauses/<int:clause_id>', methods=['DELETE'])
+@login_required
+def delete_service_clause(clause_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    clause = db.session.get(ServiceClause, clause_id)
+    if not clause:
+        return jsonify({"message": "Clause not found"}), 404
+        
+    try:
+        db.session.delete(clause)
+        db.session.commit()
+        log_activity('T&C Clause Deleted', f"Admin '{current_user.email}' deleted clause ID: {clause_id}")
+        return jsonify({"message": "Clause deleted successfully"}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": f"An error occurred: {str(e)}"}), 500

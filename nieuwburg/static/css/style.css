@@ -825,6 +825,35 @@ body::-webkit-scrollbar {
   padding-left: 0;
   text-align: left;
 }
+/* "X" CLOSE BUTTON */
+.modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1.5rem;
+  font-size: 2.5rem;
+  font-weight: 300;
+  line-height: 1;
+  color: #aaa;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+  z-index: 10;
+}
+.modal-close:hover {
+  color: #333;
+}
+
+/* CUSTOM MODAL FOOTER (no cancel button) */
+.modal-footer-custom {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-color);
+  margin-top: 1.5rem;
+}
 
 /* Form styles within the modal */
 #contact-form, #quote-form {
@@ -885,7 +914,178 @@ body::-webkit-scrollbar {
 .hidden {
   display: none !important;
 }
+/* NEW: FORM SECTION HEADER */
+.form-section-header {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.5rem;
+}
+.form-section-header:first-of-type {
+  margin-top: 0;
+}
 
+/* NEW: FORM ROW FOR SIDE-BY-SIDE FIELDS */
+.form-row {
+  display: flex;
+  gap: 1rem;
+}
+
+/* NEW: CLIENT SEARCH SUGGESTIONS */
+.client-suggestions-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 5px 10px rgba(0,0,0,0.1);
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.client-suggestions-list li {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+.client-suggestions-list li:hover {
+  background-color: #f0f4f8;
+}
+.react-modal-overlay.simple-modal {
+    /* Layout, Positioning & Background Styles */
+    display: flex; 
+    align-items: flex-start; 
+    overflow-y: auto;      
+    padding-top: 5vh;       
+    padding-bottom: 5vh;
+    position: fixed; 
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(45, 55, 72, 0.6); 
+    z-index: 1000; 
+    backdrop-filter: blur(3px); 
+
+    /* --- TRANSITION STYLES (Start Hidden) --- */
+    opacity: 0; 
+    visibility: hidden; 
+    /* Transition opacity smoothly, snap visibility AFTER fade-out */
+    transition: opacity 0.3s ease-in-out, visibility 0s linear 0.3s; 
+}
+.react-modal-overlay.simple-modal.modal-open {
+    opacity: 1; 
+    visibility: visible; 
+    /* Transition opacity smoothly, snap visibility immediately */
+    transition: opacity 0.3s ease-in-out, visibility 0s linear 0s; 
+}
+
+/* 2. Style for the 'x' close button */
+.modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1.5rem;
+  font-size: 2.5rem;
+  font-weight: 300;
+  line-height: 1;
+  color: #aaa;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+  z-index: 10;
+}
+.modal-close:hover {
+  color: #333;
+}
+
+/* 3. Make modal content align itself properly within the scrolling overlay */
+.auth-modal-content {
+    margin: auto; /* This centers the modal horizontally */
+}
+#auth-modal {
+    /* Set z-index HIGHER than React modal overlays (which use 1000) */
+    z-index: 1050; 
+
+    /* Re-declare essential positioning/display if not inherited via .simple-modal */
+    /* (You might already have these via .simple-modal, but explicitly adding them here is safe) */
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(45, 55, 72, 0.6); 
+    backdrop-filter: blur(3px);
+    display: none; /* Controlled by site.js */
+    align-items: center; 
+    justify-content: center; 
+}
+
+/* 4. Helper classes for modal form layout */
+.form-section-header {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--primary-dark);
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.5rem;
+}
+.form-section-header:first-of-type {
+  margin-top: 0;
+}
+.form-row {
+  display: flex;
+  gap: 1rem;
+}
+
+/* 5. Client search suggestions dropdown */
+.client-suggestions-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 5px 10px rgba(0,0,0,0.1);
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.client-suggestions-list li {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+  font-size: 0.9rem;
+}
+.client-suggestions-list li:hover {
+  background-color: #f0f4f8; /* var(--bg-light) */
+}
+
+/* 6. Fix button positioning in header */
+.admin-header h1 {
+    margin-right: auto; /* Pushes other items to the right */
+}
+.admin-header .cta {
+    padding: 10px 22px; /* Re-apply correct padding */
+    font-size: 0.9rem;
+    margin-left: 20px;
+}
 /* --- FAQ Page Styles --- */
 .faq-container {
   max-width: 800px;
@@ -996,9 +1196,12 @@ body::-webkit-scrollbar {
   border: 1px solid #f5c6cb;
 }
 .flash.success {
+  display: block;
+  padding: 10px;
   background-color: #d4edda;
   color: #155724;
   border: 1px solid #c3e6cb;
+  border-radius: 4px;
 }
 .password-error {
   color: red;
@@ -1908,7 +2111,7 @@ input.invalid-input {
     margin-bottom: 6px;
 }
 .auth-form-modal input[type="email"],
-.auth-form-modal input[type="password"] {
+.auth-form-modal input {
     width: 100%;
     box-sizing: border-box; /* Important for consistency */
     padding: 10px 12px; /* Reduced padding */
@@ -1918,7 +2121,7 @@ input.invalid-input {
     transition: all 0.2s ease-in-out;
 }
 .auth-form-modal input[type="email"]:focus,
-.auth-form-modal input[type="password"]:focus {
+.auth-form-modal input:focus {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(0, 106, 198, 0.2);
@@ -2700,4 +2903,689 @@ input.invalid-input {
 .button-secondary:hover {
     background-color: #f0f0f0;
     border-color: #bbb;
+}
+/* NEW: Style for the 'x' close button */
+.modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1.5rem;
+  font-size: 2.5rem;
+  font-weight: 300;
+  line-height: 1;
+  color: #aaa; /* Light gray by default */
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+  z-index: 10;
+}
+.modal-close:hover {
+  color: #333; /* Darker black on hover */
+}
+
+/* NEW: Custom footer for buttons to align right */
+.modal-footer-custom {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-color); /* Uses your existing CSS variable */
+  margin-top: 1.5rem;
+}
+/* --- PAGE HEADER --- */
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem; /* Matches your h1 mb-6 */
+}
+
+/* --- MODAL FIXES & STYLING --- */
+
+/* 1. Fixes the "cut-off" modal by allowing the overlay to scroll */
+.simple-modal {
+  align-items: flex-start; /* Aligns modal to the top */
+  overflow-y: auto;      /* Allows the *overlay* to scroll if content is too tall */
+  padding-top: 5vh;       /* Adds some space from the top */
+  padding-bottom: 5vh;
+}
+
+/* 2. Style for the 'x' close button */
+.modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1.5rem;
+  font-size: 2.5rem;
+  font-weight: 300;
+  line-height: 1;
+  color: #aaa;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+  z-index: 10;
+}
+.modal-close:hover {
+  color: #333;
+}
+
+/* 3. Make modal content align itself properly within the scrolling overlay */
+.auth-modal-content {
+  margin: auto; /* This centers the modal horizontally */
+}
+
+/* 4. Footer with no "Cancel" button */
+.modal-footer-custom {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-color);
+  margin-top: 1.5rem;
+}
+
+/* --- FORM STYLES --- */
+
+/* 5. Helper classes for modal form layout */
+.form-section-header {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.5rem;
+}
+.form-section-header:first-of-type {
+  margin-top: 0;
+}
+.form-row {
+  display: flex;
+  gap: 1rem;
+}
+
+/* 6. Client search suggestions dropdown */
+.client-suggestions-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 5px 10px rgba(0,0,0,0.1);
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.client-suggestions-list li {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+.client-suggestions-list li:hover {
+  background-color: #f0f4f8;
+}
+/* --- DAY BOOKINGS MODAL LIST --- */
+.day-booking-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color); /* Use existing variable */
+  padding: 0.75rem 0.5rem; 
+  transition: background-color 0.15s ease-in-out;
+}
+.day-booking-item:hover {
+  background-color: #f8f9fa; /* Light hover */
+}
+.day-booking-item:last-child {
+  border-bottom: none;
+}
+
+.booking-info {
+  flex-grow: 1;
+  cursor: pointer; /* Indicate clickable for edit */
+  padding-right: 1rem; /* Space before delete button */
+}
+
+.booking-time {
+  font-weight: 600; /* Make time bold */
+  color: var(--primary-color); /* Use existing variable */
+}
+
+.booking-details {
+  font-size: 0.85rem;
+  color: var(--text-light); /* Use existing variable */
+  margin-top: 0.2rem;
+}
+
+.delete-button {
+  background: none;
+  border: none;
+  color: #dc3545; /* Red color for delete */
+  cursor: pointer;
+  padding: 0.25rem; 
+  font-size: 1.1rem; 
+  line-height: 1;
+  opacity: 0; /* Start hidden */
+  transition: opacity 0.2s ease-in-out, color 0.2s ease-in-out;
+}
+.day-booking-item:hover .delete-button { /* Show on item hover */
+    opacity: 0.6;
+}
+.delete-button:hover { /* Full opacity on button hover */
+  opacity: 1;
+  color: #a71d2a; /* Darker red */
+}
+
+/* Ensure group-hover works if using Tailwind group utilities elsewhere */
+/* This specific rule might only be needed if mixing with Tailwind */
+.group:hover .group-hover\:opacity-100 {
+    opacity: 1;
+}
+/* --- DAY BOOKINGS MODAL LIST --- */
+.day-booking-item {
+  display: flex; /* Arrange info and button side-by-side */
+  align-items: center; /* Vertically align items */
+  justify-content: space-between; /* Push button to the right */
+  border-bottom: 1px solid var(--border-color); /* Use existing variable for separator */
+  padding: 0.75rem 0.5rem; /* Vertical and horizontal padding */
+  transition: background-color 0.15s ease-in-out; /* Add hover effect */
+}
+.day-booking-item:hover {
+  background-color: #f8f9fa; /* Light background on hover */
+}
+.day-booking-item:last-child {
+  border-bottom: none; /* Remove border from last item */
+}
+
+/* Style for the main clickable area (for future edit) */
+.booking-info {
+  flex-grow: 1; /* Take up available space */
+  cursor: pointer; /* Indicate it's clickable */
+  padding-right: 1rem; /* Add space before the delete button */
+}
+
+/* Style for the time */
+.booking-time {
+  font-weight: 600; /* Make time bold */
+  color: var(--primary-color); /* Use existing variable */
+}
+
+/* Style for the secondary details (Staff, Status) */
+.booking-details {
+  font-size: 0.85rem; /* Smaller text */
+  color: var(--text-light); /* Use existing variable for lighter text */
+  margin-top: 0.2rem; /* Little space below main info */
+}
+
+/* Style for the delete button (trash icon) */
+.delete-button {
+  background: none; /* No background */
+  border: none; /* No border */
+  color: #dc3545; /* Red color */
+  cursor: pointer;
+  padding: 0.25rem; 
+  font-size: 1.1rem; /* Adjust icon size */
+  line-height: 1; /* Prevent extra vertical space */
+  opacity: 0; /* Start hidden */
+  transition: opacity 0.2s ease-in-out, color 0.2s ease-in-out; /* Smooth fade and color change */
+}
+.day-booking-item:hover .delete-button { /* Show button when hovering over the list item */
+    opacity: 0.6; /* Partially visible on item hover */
+}
+.delete-button:hover { /* Full opacity and darker color on direct hover */
+  opacity: 1;
+  color: #a71d2a; 
+}
+/* --- Actions Dropdown Styles --- */
+
+.actions-dropdown-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.actions-btn {
+  /* Ensure the button has consistent sizing */
+  padding: 6px 12px;
+  line-height: 1.5;
+}
+
+.actions-dropdown-menu {
+  position: absolute;
+  z-index: 100;
+  top: 100%; /* Position it right below the button */
+  right: 0;  /* Align to the right */
+  min-width: 160px;
+  background-color: #ffffff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+}
+
+/* Styles for items inside the dropdown */
+.dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #333;
+  text-decoration: none;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dropdown-item:hover {
+  background-color: #f5f5f5;
+  color: #0056b3; /* Or your theme's primary color */
+}
+
+/* Style for disabled button in dropdown */
+.dropdown-item:disabled {
+  color: #aaa;
+  cursor: not-allowed;
+  background-color: transparent;
+}
+.actions-dropdown-wrapper {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle; /* Aligns button nicely in the table cell */
+}
+
+.actions-btn {
+  /* Ensure the button has consistent sizing */
+  padding: 6px 12px;
+  line-height: 1.5;
+}
+
+.actions-dropdown-menu {
+  position: absolute;
+  z-index: 100;
+  top: 100%; /* Position it right below the button */
+  right: 0;  /* Align to the right */
+  min-width: 160px;
+  background-color: #ffffff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+}
+
+/* Styles for items inside the dropdown */
+.dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #333;
+  text-decoration: none;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dropdown-item:hover {
+  background-color: #f5f5f5;
+  color: #0056b3; /* Or your theme's primary color */
+}
+
+/* Style for disabled button in dropdown */
+.dropdown-item:disabled {
+  color: #aaa;
+  cursor: not-allowed;
+  background-color: transparent;
+}
+
+/* --- ADD THIS NEW STYLE for the delete button --- */
+.dropdown-item-delete {
+  color: #dc3545 !important; /* Bootstrap's danger color */
+}
+.dropdown-item-delete:hover {
+  background-color: #f8d7da !important; /* Light red hover */
+  color: #721c24 !important; /* Darker red text on hover */
+}
+/* =======================================
+   QUOTE & INVOICE DETAIL STYLES
+   ======================================= */
+
+/* Grid for Billed To / Quote Details */
+.quote-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+/* Card styles from the spec */
+.detail-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb; /* Spec: Borders */
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.02); /* Spec: Light box-shadows */
+}
+
+.detail-card h3 {
+  font-family: 'Oswald', sans-serif; /* Spec: Headings */
+  font-size: 1.1rem;
+  color: #002244; /* Spec: Primary Dark */
+  margin-top: 0;
+  margin-bottom: 15px;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 10px;
+}
+
+.detail-card p {
+  margin: 0 0 12px 0;
+  line-height: 1.5;
+  color: #6b7280; /* Spec: Text (Light) */
+}
+
+.detail-card p strong {
+  color: #1f2937; /* Spec: Text (Dark) */
+  font-weight: 500;
+}
+
+/* Status Badge from Spec */
+.status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 20px;
+  text-transform: capitalize;
+  background: #e5e7eb;
+  color: #374151;
+}
+.status-badge.status-sent { background: #dbeafe; color: #1e40af; }
+.status-badge.status-draft { background: #f3f4f6; color: #4b5563; }
+.status-badge.status-paid { background: #d1fae5; color: #065f46; }
+.status-badge.status-accepted { background: #d1fae5; color: #065f46; }
+.status-badge.status-rejected { background: #fee2e2; color: #991b1b; }
+.status-badge.status-overdue { background: #fef3c7; color: #92400e; }
+
+
+/* Line Items Table */
+.line-items-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden; /* For rounded corners */
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+}
+
+.line-items-table th {
+  font-family: 'Oswald', sans-serif;
+  background: #f9fafb; /* Spec: Light Grey BG */
+  padding: 12px 15px;
+  text-align: left;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #374151;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.line-items-table td {
+  padding: 15px;
+  border-bottom: 1px solid #e5e7eb;
+  color: #1f2937; /* Spec: Text (Dark) */
+  vertical-align: top;
+}
+
+.line-items-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Totals Section */
+.quote-totals {
+  width: 40%;
+  margin-left: auto;
+  margin-top: 20px;
+  font-size: 0.95rem;
+}
+
+.totals-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px;
+  color: #1f2937;
+}
+
+.totals-row span:last-child {
+  font-weight: 600;
+}
+
+.totals-row.grand-total {
+  font-family: 'Oswald', sans-serif;
+  font-weight: bold;
+  font-size: 1.25rem;
+  background-color: #002244; /* Spec: Primary Dark */
+  color: #ffffff;
+  border-radius: 6px;
+  margin-top: 5px;
+  padding: 12px 10px;
+}
+
+/* =======================================
+   FORMAL QUOTE DOCUMENT PREVIEW STYLES
+   ======================================= */
+
+/* 1. The Grey Background Container */
+.quote-document-view-container {
+  padding: 40px 20px;
+  background-color: #f9fafb; /* Spec: Light Grey BG */
+  border-radius: 8px;
+  margin-top: 20px;
+}
+
+/* 2. The White A4 "Page" */
+.quote-document-page {
+  background: #ffffff; /* Spec: White BG */
+  border: 1px solid #e5e7eb; /* Spec: Borders */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 60px;
+  font-family: 'Montserrat', sans-serif; /* Spec: Body UI Font */
+  color: #1f2937; /* Spec: Text Dark */
+}
+
+/* 3. Document Header (Logo + Title) */
+.quote-doc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 20px;
+  border-bottom: 2px solid #002244; /* Spec: Primary Dark */
+}
+
+.quote-doc-logo img {
+  max-width: 180px;
+}
+
+.quote-doc-title {
+  text-align: right;
+  font-family: 'Montserrat', sans-serif;
+}
+
+.quote-doc-title h1 {
+  font-family: 'Oswald', sans-serif; /* Spec: Headings */
+  font-size: 2.5rem;
+  color: #002244; /* Spec: Primary Dark */
+  margin: 0;
+  line-height: 1;
+}
+.quote-doc-title p {
+  margin: 5px 0 0;
+  font-size: 0.9rem;
+  color: #6b7280; /* Spec: Text Light */
+}
+.quote-doc-title p strong {
+  color: #1f2937; /* Spec: Text Dark */
+}
+
+/* 4. Client Parties (Billed To / From) */
+.quote-doc-parties {
+  display: flex;
+  justify-content: space-between;
+  margin: 30px 0 40px;
+}
+.party-details {
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+.party-details h3 {
+  font-family: 'Oswald', sans-serif;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6b7280; /* Spec: Text Light */
+  margin: 0 0 5px;
+}
+.party-details strong {
+  color: #1f2937;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 5px;
+}
+.party-details p {
+  margin: 0;
+  color: #1f2937;
+}
+
+/* 5. Line Items Table */
+.quote-doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 30px;
+}
+.quote-doc-table th {
+  font-family: 'Oswald', sans-serif; /* Spec: Headings */
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-align: left;
+  padding: 10px 15px;
+  background-color: #f9fafb; /* Spec: Light Grey BG */
+  color: #374151;
+  border-bottom: 2px solid #e5e7eb;
+}
+.quote-doc-table th:last-child {
+  text-align: right;
+}
+.quote-doc-table td {
+  padding: 15px;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: top;
+}
+.quote-doc-table td.amount {
+  text-align: right;
+  font-weight: 500;
+}
+.quote-doc-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* 6. Totals Section */
+.quote-doc-totals {
+  display: flex;
+  justify-content: flex-end;
+}
+.quote-doc-totals-summary {
+  width: 50%;
+  max-width: 350px;
+}
+.quote-doc-totals-summary .totals-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 15px;
+  font-size: 0.95rem;
+}
+.quote-doc-totals-summary .totals-row span:first-child {
+  color: #6b7280; /* Spec: Text Light */
+}
+.quote-doc-totals-summary .totals-row span:last-child {
+  font-weight: 600;
+  color: #1f2937; /* Spec: Text Dark */
+}
+.quote-doc-totals-summary .totals-row.grand-total {
+  font-family: 'Oswald', sans-serif; /* Spec: Headings */
+  font-size: 1.3rem;
+  background: #002244; /* Spec: Primary Dark */
+  color: #ffffff;
+  border-radius: 6px;
+  margin-top: 10px;
+  padding: 12px 15px;
+}
+.quote-doc-totals-summary .totals-row.grand-total span {
+  color: #ffffff;
+}
+/* =======================================
+   QUOTE EDIT PAGE STYLES
+   ======================================= */
+
+/* 1. Style the new Line Item layout */
+.line-item-row {
+  display: flex;
+  align-items: flex-start; /* Align to top for textarea */
+  margin-bottom: 10px;
+}
+
+.line-item-row textarea.form-input {
+  line-height: 1.6;
+  min-height: 80px; /* Taller description box */
+}
+
+.line-item-inputs {
+  display: flex;
+  align-items: center; /* Align inputs */
+  width: 380px; /* Fixed width for the right-side inputs */
+  margin-left: 10px;
+}
+
+/* 2. Style the new "Locked" T&Cs section */
+.locked-settings-section {
+  background: #f9fafb; /* Spec: Light Grey BG */
+  border: 1px dashed #e5e7eb; /* Spec: Border */
+  border-radius: 8px;
+}
+
+.locked-settings-section h2 {
+  color: #6b7280; /* Spec: Text Light */
+}
+.locked-settings-section p {
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin-top: -10px;
+}
+
+.locked-settings-section textarea:disabled {
+  background: #f3f4f6;
+  color: #4b5563;
+  cursor: not-allowed;
+  resize: none;
 }

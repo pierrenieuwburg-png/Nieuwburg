@@ -15,6 +15,11 @@ import ClientDetail from './pages/ClientDetail';
 import StaffDetail from './pages/StaffDetail';
 import EditStaff from './pages/EditStaff';
 import EditClient from './pages/EditClient';
+import QuoteDetail from './pages/QuoteDetail';
+import CreateQuote from './pages/CreateQuote';
+import FormalQuoteDetail from './pages/FormalQuoteDetail';
+import EditQuote from './pages/EditQuote';
+import BusinessSettings from './pages/BusinessSettings';
 
 // Placeholder for unmatched routes
 const NotFound = () => <h2>Admin Page Not Found</h2>;
@@ -33,14 +38,20 @@ function App() {
       <Route path="/staff" element={<Staff />} />
       <Route path="/staff/:staffId" element={<StaffDetail />} />
       <Route path="/bookings" element={<Bookings />} />
+      <Route path="services" element={<Services />} />
       <Route path="/staff/edit/:staffId" element={<EditStaff />} />
       <Route path="/applications" element={<Applications />} />
       <Route path="/quotes" element={<Quotes />} />
+      <Route path="/quotes/new" element={<CreateQuote />} />
+      <Route path="/quotes/:quoteId" element={<QuoteDetail />} />
       <Route path="/invoices" element={<Invoices />} />
       <Route path="/services" element={<Services />} />
       <Route path="/blog" element={<Blog />} />
       <Route path="/activity-log" element={<ActivityLog />} />
       <Route path="*" element={<NotFound />} />
+      <Route path="/quotes/formal/:quoteId" element={<FormalQuoteDetail />} />
+      <Route path="/quotes/edit/:quoteId" element={<EditQuote />} />
+      <Route path="/settings" element={<BusinessSettings />} />
     </Routes>
   );
 }

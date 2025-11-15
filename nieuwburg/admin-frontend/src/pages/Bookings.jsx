@@ -1,248 +1,388 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router-dom'; // Keep Link if used elsewhere, otherwise remove
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
-import listPlugin from '@fullcalendar/list';
-import interactionPlugin from '@fullcalendar/interaction'; // For dateClick/eventClick
+import interactionPlugin from '@fullcalendar/interaction';
+import { BarLoader } from 'react-spinners';
+
+import ScheduleBookingModal from '../components/ScheduleBookingModal';
+import AddManualBookingModal from '../components/AddManualBookingModal';
+import DayBookingsModal from '../components/DayBookingsModal';
+// --- 1. IMPORT THE EDIT MODAL ---
+import EditBookingModal from '../components/EditBookingModal';
+
+
+// Helper function to format dates (Keep if needed elsewhere)
+const formatDate = (isoString) => {
+  if (!isoString) return 'N/A';
+  try {
+    // Simplified format example
+    return new Date(isoString).toLocaleDateString('en-ZA', {
+      day: '2-digit', month: 'short', year: 'numeric',
+    });
+  } catch (error) {
+    return isoString;
+  }
+};
 
 function Bookings() {
-  const [currentJobs, setCurrentJobs] = useState([]);
+  // Existing state for data
   const [newBookings, setNewBookings] = useState([]);
-  const [isLoadingJobs, setIsLoadingJobs] = useState(true);
-  const [isLoadingBookings, setIsLoadingBookings] = useState(true);
+  const [currentJobs, setCurrentJobs] = useState([]);
+  const [calendarEvents, setCalendarEvents] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [calendarEvents, setCalendarEvents] = useState([]); // State for calendar events
+  const [flashMessage, setFlashMessage] = useState(null);
 
-  // Fetch Current Jobs (Scheduled/In-Progress)
-  useEffect(() => {
-    const fetchCurrentJobs = async () => {
-      setIsLoadingJobs(true);
-      setError(null); // Clear previous errors
-      try {
-        const response = await fetch('/api/admin/jobs/current');
-        if (!response.ok) {
-          if (response.status === 403) throw new Error('Permission denied fetching current jobs.');
-          throw new Error(`HTTP error fetching jobs! status: ${response.status}`);
-        }
-        const data = await response.json();
-        setCurrentJobs(data);
+  // Existing state for Schedule Modal
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState(null);
 
-        // --- Transform job data for FullCalendar ---
-        const events = data.map(job => ({
-          id: job.id.toString(), // FullCalendar needs string IDs
-          title: `${job.client_name} - ${job.service}`,
-          start: `${job.scheduled_date_iso}T${job.start_time || '09:00:00'}`, // Combine date and time, default if no time
-          // Optionally add end time if available and needed for timeGrid view
-          // end: `${job.scheduled_date_iso}T${job.end_time || '17:00:00'}`,
-          extendedProps: { // Store original job data if needed for clicks
-            client_name: job.client_name,
-            service: job.service,
-            status: job.status,
-            assigned_staff: job.assigned_staff,
-          },
-          // Add color based on status if desired (using colors from style.css)
-           backgroundColor: getStatusColor(job.status),
-           borderColor: getStatusColor(job.status),
-        }));
-        setCalendarEvents(events);
-        // --- End Transformation ---
+  // Existing state for Add Manual Modal
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [selectedDateForManual, setSelectedDateForManual] = useState(null); // Separate state
 
-      } catch (err) {
-        console.error('Error fetching current jobs:', err);
-        setError(prev => prev ? `${prev}\n${err.message}` : err.message);
-        setCalendarEvents([]); // Clear events on error
-      } finally {
-        setIsLoadingJobs(false);
+  // State for Day Bookings Modal
+  const [isDayModalOpen, setIsDayModalOpen] = useState(false);
+  const [selectedDateForDayView, setSelectedDateForDayView] = useState(null);
+
+  // State for Edit Modal
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedJobIdForEdit, setSelectedJobIdForEdit] = useState(null);
+
+  // Fetch bookings and jobs
+  const fetchBookings = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [newBookingsResponse, scheduledJobsResponse] = await Promise.all([
+        fetch('/api/admin/bookings/new'),
+        fetch('/api/admin/jobs/current') // Fetches 'Scheduled' and 'In-Progress' jobs
+      ]);
+
+      if (!newBookingsResponse.ok) {
+        throw new Error(`Failed fetch new bookings (${newBookingsResponse.status})`);
       }
-    };
-    fetchCurrentJobs();
-  }, []); // Run once on mount
+      const newBookingsData = await newBookingsResponse.json();
+      // Map data for the "New Booking Requests" table
+      setNewBookings(newBookingsData.map(req => ({
+        id: req.id,
+        client_name: req.client_name,
+        service_name: req.service, // Field name from API response
+        requested_date: req.request_date,
+        notes: req.address,
+        user_id: req.user_id,
+        total_price: req.total_price
+      })));
 
-  // Fetch New Confirmed Bookings (Quote Requests) - Keep as is
-  useEffect(() => {
-    const fetchNewBookings = async () => {
-      setIsLoadingBookings(true);
-      try {
-        const response = await fetch('/api/admin/bookings/new');
-        if (!response.ok) {
-           if (response.status === 403) throw new Error('Permission denied fetching new bookings.');
-           throw new Error(`HTTP error fetching new bookings! status: ${response.status}`);
-        }
-        const data = await response.json();
-        setNewBookings(data);
-      } catch (err) {
-        console.error('Error fetching new bookings:', err);
-        setError(prev => prev ? `${prev}\n${err.message}` : err.message);
-      } finally {
-        setIsLoadingBookings(false);
+      if (!scheduledJobsResponse.ok) {
+        throw new Error(`Failed fetch scheduled jobs (${scheduledJobsResponse.status})`);
       }
-    };
-    fetchNewBookings();
-  }, []); // Run once on mount
+      const scheduledJobsData = await scheduledJobsResponse.json();
+      // Set data for the "Current Scheduled Jobs" table
+      setCurrentJobs(scheduledJobsData);
 
-  // Helper function to get status colors (similar to admin_bookings.html logic)
-  const getStatusColor = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'scheduled': return '#007bff';
-      case 'in-progress': return '#ffc107';
-      case 'completed': return '#28a745';
-      case 'cancelled': return '#6c757d';
-      default: return '#6c757d'; // Default grey
+      // Format data for FullCalendar events
+      const events = scheduledJobsData.map(job => ({
+        id: String(job.id), // Ensure ID is a string
+        title: `${job.client_name} - ${job.service || 'Job'}`, // Use service name from job data
+        start: `${job.scheduled_date_iso}T${job.start_time || '09:00:00'}`, // API must provide scheduled_date_iso
+        borderColor: job.status === 'Completed' ? '#28a745' : '#007bff', // Adjust colors as needed
+        backgroundColor: job.status === 'Completed' ? '#28a745' : '#007bff',
+      }));
+      setCalendarEvents(events);
+
+    } catch (err) {
+      console.error("Error fetching bookings:", err);
+      setError(err.message);
+      setNewBookings([]);
+      setCurrentJobs([]);
+      setCalendarEvents([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchBookings();
+  }, [fetchBookings]);
+
+  // --- Modal Handlers ---
+
+  // Schedule Modal
+  const handleOpenScheduleModal = (booking) => { setSelectedBooking(booking); setIsScheduleModalOpen(true); };
+  const handleCloseScheduleModal = () => { setIsScheduleModalOpen(false); setSelectedBooking(null); };
+  const handleJobScheduled = (message) => {
+    setFlashMessage({ type: 'success', text: message });
+    fetchBookings(); // Refresh all data
+    handleCloseScheduleModal(); // Close the modal
+    setTimeout(() => setFlashMessage(null), 4000);
+  };
+
+  // Add Manual Modal
+  const handleOpenManualModal = () => { setSelectedDateForManual(null); setIsManualModalOpen(true); };
+  const handleCloseManualModal = () => { setIsManualModalOpen(false); setSelectedDateForManual(null); };
+  const handleJobCreated = (message) => { // Called by AddManualBookingModal's onBooked prop
+    setFlashMessage({ type: 'success', text: message });
+    fetchBookings(); // Refresh all data
+    handleCloseManualModal(); // Close the modal
+    setTimeout(() => setFlashMessage(null), 4000);
+  };
+
+  // Calendar date click
+  const handleDateClick = (arg) => {
+    // Open the Day View modal
+    console.log("Calendar date clicked:", arg.dateStr);
+    setSelectedDateForDayView(arg.dateStr); // Use YYYY-MM-DD format
+    setIsDayModalOpen(true);
+  };
+
+  // Calendar event click
+  const handleEventClick = (arg) => {
+    const jobId = arg.event.id;
+    console.log('Calendar event clicked:', jobId);
+    // Directly open Edit Modal
+    handleOpenEditModal(jobId);
+  };
+
+  // Day Modal handlers
+  const handleCloseDayModal = () => {
+    setIsDayModalOpen(false);
+    setSelectedDateForDayView(null);
+  };
+
+  // Called by DayBookingsModal's onBookingDeleted prop
+  const handleBookingDeleted = (deletedJobId, date) => {
+    console.log(`Booking ${deletedJobId} deleted from Bookings.jsx`);
+    setFlashMessage({ type: 'success', text: `Booking #${deletedJobId} deleted.` });
+    fetchBookings(); // Refresh calendar and tables
+    // Keep Day modal open (as per report note)
+  };
+
+  // Edit Modal handlers
+  // Called by DayBookingsModal's onEditBooking prop OR handleEventClick
+  const handleOpenEditModal = (jobId) => {
+    console.log("Opening Edit Modal for Job ID:", jobId);
+    if (!jobId) return; // Basic check
+    setSelectedJobIdForEdit(String(jobId)); // Ensure it's a string if needed
+    
+    // Close Day modal if it happens to be open
+    if (isDayModalOpen) {
+        setIsDayModalOpen(false);
+        setSelectedDateForDayView(null);
+    }
+    setIsEditModalOpen(true); // Open the Edit Modal
+  };
+
+  const handleCloseEditModal = () => {
+    setIsEditModalOpen(false);
+    setSelectedJobIdForEdit(null);
+  };
+
+  // Called by the EditBookingModal's onJobUpdated prop
+  const handleJobUpdated = (message) => {
+    setFlashMessage({ type: 'success', text: message });
+    fetchBookings(); // Refresh data
+    handleCloseEditModal(); // Close edit modal after update
+    setTimeout(() => setFlashMessage(null), 4000);
+  };
+
+  // --- 2. ADD HANDLER FOR QUICK STATUS CHANGE ---
+  const handleStatusChange = async (jobId, newStatus) => {
+    console.log(`Updating Job #${jobId} to status: ${newStatus}`);
+    
+    try {
+      const response = await fetch(`/api/admin/jobs/update_status/${jobId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.message || `Failed to update status (Status: ${response.status})`);
+      }
+      
+      const result = await response.json();
+      setFlashMessage({ type: 'success', text: result.message });
+      // Refresh all data to ensure calendar and tables are in sync
+      fetchBookings(); 
+      
+    } catch (err) {
+      console.error("Error updating status:", err);
+      setFlashMessage({ type: 'error', text: `Error: ${err.message}` });
+      // Re-fetch to revert optimistic UI change (if we were doing one)
+      fetchBookings(); 
+    } finally {
+      setTimeout(() => setFlashMessage(null), 4000);
     }
   };
 
-  // Helper function to format price (keep as is)
-  const formatPrice = (price) => {
-      if (price === 'N/A' || price === null || price === undefined) return 'N/A';
-      const num = parseFloat(price);
-      return isNaN(num) ? 'N/A' : `R${num.toFixed(2)}`;
-  };
 
-  // --- Calendar Event Handlers (Placeholders) ---
-  const handleDateClick = (arg) => {
-    // Placeholder: Could open a modal to add a job for 'arg.dateStr'
-    alert('Clicked on date: ' + arg.dateStr);
-  };
-
-  const handleEventClick = (arg) => {
-    // Placeholder: Could open a modal showing job details using 'arg.event.id'
-    // or navigate to the job edit page
-    alert('Clicked on event: ' + arg.event.title + '\nJob ID: ' + arg.event.id);
-    // Example navigation (if you set up the route):
-    // navigate(`/job/edit/${arg.event.id}`);
-  };
-  // --- End Calendar Event Handlers ---
+  // --- Render Functions ---
+  const renderLoading = () => (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '20rem' }}>
+      <BarLoader color="#4A90E2" width="50%" />
+    </div>
+  );
+  const renderError = () => (
+    <div className="flash danger mb-4">Error loading booking data: {error}</div>
+  );
 
   return (
-    <div>
+    <div className="container mx-auto p-4 md:p-6">
+      {/* Header */}
       <div className="admin-header">
-        <h1>Bookings & Scheduling</h1>
-        <p>Manage incoming requests and schedule new jobs.</p>
+        <h1>Job Bookings & Scheduling</h1>
+        <button type="button" className="cta" onClick={handleOpenManualModal}>
+          Add Manual Booking
+        </button>
       </div>
 
-      {/* Display general error messages */}
-      {error && (
-        <div className="flash error" style={{ marginBottom: '20px' }}>
-           {error.split('\n').map((line, i) => <p key={i} style={{margin:0}}>{line}</p>)}
+      {/* Flash Messages */}
+      {flashMessage && (
+        <div className={`flash ${flashMessage.type} mb-4`}>
+          {flashMessage.text}
         </div>
       )}
 
-      {/* --- FullCalendar Implementation --- */}
-      <div className="admin-section">
-        <h2>Schedule Overview</h2>
-        {isLoadingJobs ? (
-            <p>Loading schedule...</p>
-        ) : (
+      {/* Loading/Error State */}
+      {error && renderError()}
+      {isLoading && renderLoading()}
+
+      {/* Main Content */}
+      {!isLoading && !error && (
+        <>
+          {/* Calendar */}
+          <div className="bg-white p-4 shadow rounded-lg mb-6">
             <FullCalendar
-                plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
-                initialView="dayGridMonth"
-                headerToolbar={{
-                    left: 'prev,next today',
-                    center: 'title',
-                    right: 'dayGridMonth,timeGridWeek,listWeek'
-                }}
-                events={calendarEvents}
-                height="auto" // Adjust height automatically
-                dayMaxEvents={true} // Allow "more" link if too many events
-                dateClick={handleDateClick} // Handle clicking on a date
-                eventClick={handleEventClick} // Handle clicking on an event
+              plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+              initialView="dayGridMonth"
+              headerToolbar={{
+                left: 'prev,next today',
+                center: 'title',
+                right: 'dayGridMonth,timeGridWeek,timeGridDay'
+              }}
+              events={calendarEvents}
+              dateClick={handleDateClick}    // Opens DayBookingsModal
+              eventClick={handleEventClick}   // Opens EditBookingModal
+              editable={true}
+              droppable={true}
             />
-        )}
-      </div>
-      {/* --- End FullCalendar Implementation --- */}
+          </div>
 
+          {/* Tables */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* New Booking Requests Table */}
+            <div className="bg-white p-4 shadow rounded-lg">
+              <h2 className="text-xl font-semibold mb-4">New Booking Requests</h2>
+              <div className="overflow-x-auto">
+                <table className="data-table min-w-full">
+                  <thead><tr><th>Client</th><th>Service</th><th>Requested</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {newBookings.length > 0 ? (
+                      newBookings.map(booking => (
+                        <tr key={booking.id}>
+                          <td data-label="Client">{booking.client_name}</td>
+                          <td data-label="Service">{booking.service_name}</td>
+                          <td data-label="Requested">{booking.requested_date}</td>
+                          <td data-label="Actions">
+                            <button type="button" className="cta-outline-small" onClick={() => handleOpenScheduleModal(booking)}>
+                              View & Schedule
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan="4" className="text-center py-4 text-gray-500">No new booking requests.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-      <div className="admin-section">
-        <h2>Scheduled & In-Progress Jobs</h2>
-        {/* Keep the table for now, maybe hide/remove later if calendar is sufficient */}
-        <table className="data-table" id="jobs-table">
-          {/* ... table structure remains the same ... */}
-           <thead>
-            <tr>
-              <th>Date</th>
-              <th>Client</th>
-              <th>Service</th>
-              <th>Status</th>
-              <th>Assigned Staff</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoadingJobs ? (
-              <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>Loading current jobs...</td></tr>
-            ) : currentJobs.length > 0 ? (
-              currentJobs.map(job => (
-                <tr key={job.id} id={`job-row-${job.id}`}>
-                  <td>{job.scheduled_date} {job.start_time}</td>
-                  <td>{job.client_name}</td>
-                  <td>{job.service}</td>
-                  <td>
-                    <span id={`status-badge-${job.id}`} className={`booking-status status-${job.status.toLowerCase()}`}>
-                      {job.status}
-                    </span>
-                  </td>
-                  <td>{job.assigned_staff}</td>
-                  <td className="action-buttons">
-                    <Link to={`/job/edit/${job.id}`} className="cta-outline-small">Edit</Link>
-                     <select className="status-update-dropdown" data-job-id={job.id} defaultValue={job.status}>
-                        <option value="Scheduled">Scheduled</option>
-                        <option value="In-Progress">In-Progress</option>
-                        <option value="Completed">Completed</option>
-                        <option value="Cancelled">Cancelled</option>
-                    </select>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>There are no currently scheduled jobs.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            {/* Current Scheduled Jobs Table */}
+            <div className="bg-white p-4 shadow rounded-lg">
+              <h2 className="text-xl font-semibold mb-4">Current Scheduled Jobs</h2>
+              <div className="overflow-x-auto">
+                <table className="data-table min-w-full">
+                  <thead><tr><th>Client</th><th>Service</th><th>Scheduled</th><th>Staff</th><th>Status</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {currentJobs.length > 0 ? (
+                      currentJobs.map(job => (
+                        <tr key={job.id}>
+                          <td data-label="Client">{job.client_name}</td>
+                          <td data-label="Service">{job.service}</td>
+                          <td data-label="Scheduled">{job.scheduled_date} {job.start_time}</td>
+                          <td data-label="Staff">{job.assigned_staff || 'N/A'}</td>
+                          <td data-label="Status">
+                            {/* --- 3. CONNECT ONCHANGE HANDLER --- */}
+                            <select 
+                              className="form-control-small" 
+                              value={job.status} // Use value for controlled component
+                              onChange={(e) => handleStatusChange(job.id, e.target.value)}
+                            >
+                              <option value="Scheduled">Scheduled</option>
+                              <option value="In Progress">In Progress</option>
+                              <option value="Completed">Completed</option>
+                              <option value="Cancelled">Cancelled</option>
+                            </select>
+                          </td>
+                          <td data-label="Actions">
+                            {/* --- 4. ADD EDIT BUTTON --- */}
+                            <button 
+                              type="button" 
+                              className="cta-outline-small"
+                              onClick={() => handleOpenEditModal(job.id)}
+                            >
+                              Edit
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan="6" className="text-center py-4 text-gray-500">No jobs scheduled.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
-      <div className="admin-section">
-        <h2>New Confirmed Bookings</h2>
-         {/* Keep the new bookings table as is */}
-        <table className="data-table">
-           {/* ... table structure remains the same ... */}
-            <thead>
-            <tr>
-              <th>Confirmed On</th>
-              <th>Client</th>
-              <th>Service Details</th>
-              <th>Address</th>
-              <th>Final Price</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoadingBookings ? (
-              <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>Loading new bookings...</td></tr>
-            ) : newBookings.length > 0 ? (
-              newBookings.map(req => (
-                <tr key={req.id}>
-                  <td>{req.request_date}</td>
-                  <td>
-                    <strong>{req.client_name}</strong><br />
-                    <small>{req.client_phone}</small>
-                  </td>
-                  <td>
-                    <strong>{req.service}</strong> ({req.property_type})
-                  </td>
-                  <td>{req.address}</td>
-                  <td><strong>{formatPrice(req.total_price)}</strong></td>
-                  <td>
-                    <Link to={`/schedule_job/${req.id}`} className="cta-outline-small">View & Schedule</Link>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>There are no new confirmed bookings.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* --- RENDER ALL MODALS --- */}
+      <ScheduleBookingModal
+        isOpen={isScheduleModalOpen}
+        onClose={handleCloseScheduleModal}
+        booking={selectedBooking}
+        onScheduled={handleJobScheduled}
+      />
+
+      <AddManualBookingModal
+        isOpen={isManualModalOpen}
+        onClose={handleCloseManualModal}
+        onBooked={handleJobCreated}
+        preselectedDate={selectedDateForManual}
+      />
+
+      <DayBookingsModal
+        isOpen={isDayModalOpen}
+        onClose={handleCloseDayModal}
+        selectedDate={selectedDateForDayView}
+        onBookingDeleted={handleBookingDeleted}
+        onEditBooking={handleOpenEditModal}
+      />
+
+      {/* --- 5. RENDER THE EDIT MODAL --- */}
+      <EditBookingModal 
+        isOpen={isEditModalOpen}
+        onClose={handleCloseEditModal}
+        jobId={selectedJobIdForEdit}
+        onJobUpdated={handleJobUpdated} 
+      /> 
+      
     </div>
   );
 }

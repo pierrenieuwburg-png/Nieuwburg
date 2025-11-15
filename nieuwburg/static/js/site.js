@@ -103,7 +103,6 @@ function initializePasswordValidator() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // --- NEW: Navbar Scroll Logic from NieuwburgSite2 ---
     const header = document.querySelector('.site-header');
     if (header) {
         window.addEventListener('scroll', () => {
@@ -279,6 +278,7 @@ if (bookingModal) {
   // --- Initialize Modals ---
 setupModal('contact-modal', ['contact-nav-link', 'hero-contact-btn', 'contact-footer-btn'], 'close-contact-modal-button', 'contact-form', handleContactFormSubmit);
 setupModal('join-team-modal', ['join-team-footer-btn', 'hero-join-team-btn'], 'close-join-team-modal-button', 'staff-application-form', handleStaffApplicationSubmit);
+setupModal('quote-modal', ['hero-quote-btn'], 'close-quote-modal-button', 'quote-request-form', handleQuoteFormSubmit);
 
   // --- Service Detail Modal Logic ---
   const serviceModal = document.getElementById('service-detail-modal');
@@ -666,18 +666,21 @@ async function handleRegisterSubmit(e) {
     }
     // --- Specialized Quote Button in Booking Modal ---
     const specializedQuoteBtn = document.getElementById('specialized-quote-btn');
-    if (specializedQuoteBtn) {
-        specializedQuoteBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            // Close the current booking modal
-            const bookingModal = document.getElementById('booking-modal');
-            if (bookingModal) bookingModal.classList.remove('visible');
+if (specializedQuoteBtn) {
+    specializedQuoteBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        
+        // Close the current booking modal
+        const bookingModal = document.getElementById('booking-modal');
+        if (bookingModal) bookingModal.classList.remove('visible');
 
-            // Open the contact modal
-            const contactModal = document.getElementById('contact-modal');
-            if (contactModal) contactModal.classList.add('visible');
-        });
-    }
+        // Open the NEW custom quote modal
+        const quoteModal = document.getElementById('quote-modal');
+        if (quoteModal) {
+            quoteModal.classList.add('visible');
+        }
+    });
+}
 // --- DYNAMIC BLOG POST LOADER FOR HOMEPAGE ---
   const homeBlogGrid = document.getElementById('home-blog-grid');
   if (homeBlogGrid) {
@@ -803,43 +806,78 @@ async function handleContactFormSubmit(e) {
   }
 }
 
+// --- NEW FORM HANDLER for Specialized Quotes ---
+// static/js/site.js (around line 816 after deleting the first one)
+
 async function handleQuoteFormSubmit(e) {
-  e.preventDefault();
-  const form = e.target;
-  
-  const formData = new FormData(form);
-  const data = {};
-  const addons = [];
-  for (let [key, value] of formData.entries()) {
-      if (key === 'addons') {
-          addons.push(value);
-      } else {
-          data[key] = value;
-      }
-  }
-  data.addons = addons;
+    e.preventDefault();
+    const form = e.target;
+    const submitBtn = document.getElementById('quote-submit-btn');
+    const alertPlaceholder = document.getElementById('quote-alert-placeholder');
+    const quoteModal = document.getElementById('quote-modal'); 
 
-  try {
-      const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-      const res = await fetch('/api/quote', {
-          method: 'POST',
-          headers: { 
-              'Content-Type': 'application/json',
-              'X-CSRFToken': csrfToken
-          },
-          body: JSON.stringify(data)
-      });
-      const json = await res.json();
+    // 1. Clear previous messages immediately
+    alertPlaceholder.textContent = ''; 
+    alertPlaceholder.className = 'flash'; // Reset class
+    alertPlaceholder.style.display = 'none'; 
 
-      if (res.ok) {
-        location.reload();
-      } else {
-        alert(json.message || 'An error occurred. Please try again.');
-      }
-  } catch (error) {
-      console.error("Quote form submission error:", error);
-      alert('A network error occurred. Please try again.');
-  }
+    // 2. Disable button immediately and change text
+    submitBtn.disabled = true;
+    const originalBtnText = submitBtn.textContent;
+    submitBtn.textContent = 'Submitting...';
+
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+
+    try {
+        const response = await fetch('/api/request-quote', { // Correct endpoint
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }, // No CSRF needed here
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            console.log("Success:", result.message); // Keep for debugging
+
+            // 3. Show success message CLEARLY
+            alertPlaceholder.textContent = result.message;
+            alertPlaceholder.className = 'flash success'; // Apply success style
+            alertPlaceholder.style.display = 'block'; // Make it visible
+            form.reset(); 
+
+            // 4. Set timeout to close modal AND THEN re-enable button
+            setTimeout(() => {
+                if (quoteModal) quoteModal.classList.remove('visible');
+                // Re-enable button ONLY after modal is closed
+                submitBtn.disabled = false; 
+                submitBtn.textContent = originalBtnText;
+                // Optionally hide the success message again AFTER closing
+                // alertPlaceholder.style.display = 'none'; 
+            }, 3000); // 3-second delay
+
+        } else {
+            // Show error message from server
+            console.error("Server Error:", result.message);
+            alertPlaceholder.textContent = result.message || 'An error occurred submitting your request.';
+            alertPlaceholder.className = 'flash error';
+            alertPlaceholder.style.display = 'block';
+            // 5. Re-enable button immediately on server error
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalBtnText;
+        }
+    } catch (error) {
+        // Show network/fetch error
+        console.error('Fetch Error:', error);
+        alertPlaceholder.textContent = 'A network error occurred. Please check connection and try again.';
+        alertPlaceholder.className = 'flash error';
+        alertPlaceholder.style.display = 'block';
+        // 6. Re-enable button immediately on fetch error
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalBtnText;
+    } 
+    // No finally block needed, button re-enabling handled in specific paths.
 }
 
 async function initializePaystack(bookingData) {
@@ -913,6 +951,39 @@ async function handleStaffApplicationSubmit(e) {
     } catch (error) {
         console.error("Staff application submission error:", error);
         alert('An unexpected error occurred. Please try again.');
+    }
+}
+
+// --- NEW HELPER FUNCTION for populating service dropdowns ---
+async function loadServiceCategories(selectElementId) {
+    const selectEl = document.getElementById(selectElementId);
+    if (!selectEl) return;
+
+    // Check if options are already loaded
+    if (selectEl.options.length > 1) {
+        return;
+    }
+
+    try {
+        // This API endpoint is already used by your booking modal
+        const response = await fetch('/api/services'); 
+        if (!response.ok) throw new Error('Failed to fetch services');
+
+        const allServicesData = await response.json();
+
+        if (allServicesData.length > 0) {
+            allServicesData.forEach(category => {
+                const option = document.createElement('option');
+                option.value = category.id;
+                option.textContent = category.name;
+                selectEl.appendChild(option);
+            });
+        } else {
+            selectEl.innerHTML = '<option value="" disabled>No services available</option>';
+        }
+    } catch (error) {
+        console.error('Error loading service categories:', error);
+        selectEl.innerHTML = '<option value="" disabled>Error loading services</option>';
     }
 }
 

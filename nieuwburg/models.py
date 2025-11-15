@@ -12,6 +12,14 @@ job_staff_association = db.Table('job_staff_association',
     db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True)
 )
 
+# === NEW: Association table for Services and T&C Clauses ===
+service_clauses_association = db.Table('service_clauses_association',
+    db.Column('service_item_id', db.Integer, db.ForeignKey('service_item.id'), primary_key=True),
+    db.Column('service_clause_id', db.Integer, db.ForeignKey('service_clause.id'), primary_key=True)
+)
+# === END OF NEW CODE ===
+
+
 # --- Main Models ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -32,7 +40,8 @@ class User(UserMixin, db.Model):
 
     # Relationships
     profile = db.relationship('Profile', backref='user', uselist=False, cascade="all, delete-orphan")
-    quote_requests = db.relationship('QuoteRequest', backref='user', lazy=True, cascade="all, delete-orphan")
+    #quote_requests = db.relationship('QuoteRequest', lazy=True, cascade="all, delete-orphan")
+    quote_requests = db.relationship('QuoteRequest', back_populates='user', lazy=True)
     quotes = db.relationship('Quote', backref='user', lazy=True, cascade="all, delete-orphan")
     invoices = db.relationship('Invoice', backref='user', lazy=True, cascade="all, delete-orphan")
 
@@ -68,14 +77,28 @@ class Profile(db.Model):
 
 class QuoteRequest(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    property_type = db.Column(db.String(50))
-    primary_service = db.Column(db.String(100))
-    service_frequency = db.Column(db.String(50))
-    status = db.Column(db.String(20), default='Pending')
-    request_date = db.Column(db.DateTime, default=datetime.utcnow)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-    total_price = db.Column(db.Float)
-    service_details = db.Column(db.Text)
+    property_type = db.Column(db.String(50), nullable=True) 
+    primary_service = db.Column(db.String(100), nullable=True)
+    service_frequency = db.Column(db.String(50), nullable=True)
+    total_price = db.Column(db.Float, nullable=True)
+    service_details = db.Column(db.Text, nullable=True)
+    service_category_name = db.Column(db.String(150), nullable=True) 
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    user = db.relationship('User', back_populates='quote_requests')
+    
+    # Fields used by specialized quote form / contact form
+    name = db.Column(db.String(150), nullable=True) 
+    email = db.Column(db.String(150), nullable=True)
+    phone = db.Column(db.String(50), nullable=True)
+    address = db.Column(db.String(255), nullable=True) # Single definition
+    subject = db.Column(db.String(150), nullable=True) 
+    description = db.Column(db.Text, nullable=True) # Use this for the 'message'
+
+    # Common fields
+    request_date = db.Column(db.DateTime, default=datetime.utcnow) 
+    status = db.Column(db.String(50), default='Pending') # Unified status field
+
+    # Relationships
     job = db.relationship('Job', back_populates='quote_request', uselist=False)
 
 class Quote(db.Model):
@@ -98,6 +121,12 @@ class Quote(db.Model):
     deposit_paid = db.Column(db.Boolean, default=False)
     line_items = db.relationship('QuoteLineItem', backref='quote', lazy=True, cascade="all, delete-orphan")
 
+    # === NEW: Fields for per-quote settings ===
+    business_address = db.Column(db.String(500), nullable=True)
+    registration_number = db.Column(db.String(100), nullable=True)
+    terms_and_conditions = db.Column(db.Text, nullable=True)
+    # === END OF NEW CODE ===
+
 class QuoteLineItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     description = db.Column(db.Text, nullable=False)
@@ -105,16 +134,6 @@ class QuoteLineItem(db.Model):
     unit_price = db.Column(db.Float, nullable=False)
     amount = db.Column(db.Float, nullable=False)
     quote_id = db.Column(db.Integer, db.ForeignKey('quote.id'), nullable=False)
-
-class SpecializedQuoteRequest(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    email = db.Column(db.String(100), nullable=False)
-    phone = db.Column(db.String(20), nullable=False)
-    area = db.Column(db.String(100))
-    message = db.Column(db.Text, nullable=False)
-    request_date = db.Column(db.DateTime, default=datetime.utcnow)
-    status = db.Column(db.String(20), default='New')
 
 class Invoice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -148,6 +167,49 @@ class Job(db.Model):
     quote_request = db.relationship('QuoteRequest', back_populates='job')
     assigned_staff = db.relationship('User', secondary=job_staff_association, lazy='subquery',
     backref=db.backref('jobs_assigned', lazy=True))
+    service_id = db.Column(db.Integer, db.ForeignKey('service_item.id'), nullable=True)
+    service = db.relationship('ServiceItem', backref=db.backref('jobs', lazy=True))
+    client_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    client = db.relationship('User', foreign_keys=[client_id], backref=db.backref('jobs_as_client', lazy=True))
+
+class BusinessSettings(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    business_name = db.Column(db.String(255), default="Nieuwburg Blitz")
+    business_address = db.Column(db.String(500), default="24 A 5, Parow Park, Balfour Street, Cape Town, 7500")
+    registration_number = db.Column(db.String(100), default="2025/123456/07")
+    default_terms = db.Column(db.Text, default="1. All payments are due within 30 days.\n2. ...")
+    
+    # We will add the T&C clause library here in Step 2
+    
+    @staticmethod
+    def get_settings():
+        """A helper to get the first (and only) settings row."""
+        settings = BusinessSettings.query.first()
+        if not settings:
+            settings = BusinessSettings()
+            db.session.add(settings)
+            db.session.commit()
+        return settings
+
+class ServiceClause(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)  
+    text = db.Column(db.Text, nullable=False)
+
+    # === NEW: Link to ServiceItem (many-to-many) ===
+    service_items = db.relationship(
+        'ServiceItem', 
+        secondary=service_clauses_association,
+        back_populates='linked_clauses'
+    )
+    # === END OF NEW CODE ===
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'text': self.text
+        }
 
 class StaffApplication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -173,6 +235,14 @@ class ServiceItem(db.Model):
     category_id = db.Column(db.Integer, db.ForeignKey('service_category.id'), nullable=False)
     prices = db.relationship('ServicePrice', backref='service_item', lazy=True, cascade="all, delete-orphan")
     
+    # === NEW: Link to ServiceClause (many-to-many) ===
+    linked_clauses = db.relationship(
+        'ServiceClause',
+        secondary=service_clauses_association,
+        back_populates='service_items'
+    )
+    # === END OF NEW CODE ===
+
 class ServicePrice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     frequency = db.Column(db.String(50), nullable=False)

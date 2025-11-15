@@ -10,7 +10,11 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from config import Config
 from datetime import datetime
-import pytz # Import pytz
+import pytz
+from markupsafe import escape, Markup
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Initialize extensions
 db = SQLAlchemy()
@@ -39,8 +43,15 @@ def to_sast(utc_dt):
         return aware_utc_dt.astimezone(sast_timezone)
     except Exception as e:
         print(f"Error converting timezone: {e}")
-        return utc_dt # Return original on error
-# --- END ADDED FILTER ---
+        return utc_dt
+
+def nl2br(value):
+    """Converts newlines in text to HTML <br> tags."""
+    if value is None:
+        return ''
+    escaped_value = escape(str(value)) 
+    result = escaped_value.replace('\r\n', '<br>\n').replace('\n', '<br>\n')
+    return Markup(result)
 
 def create_app(config_class=Config):
     """Create and configure an instance of the Flask application."""
@@ -83,12 +94,9 @@ def create_app(config_class=Config):
         register_form = RegistrationForm()
         return dict(login_form=login_form, register_form=register_form)
 
-    # --- Register the custom Jinja filter ---
     app.jinja_env.filters['to_sast'] = to_sast
-    # --- END FILTER REGISTRATION ---
+    app.jinja_env.filters['nl2br'] = nl2br
 
-
-    # Configure Google OAuth within the app context
     oauth.register(
         name='google',
         client_id=app.config['GOOGLE_CLIENT_ID'],
@@ -106,7 +114,9 @@ def create_app(config_class=Config):
         app.register_blueprint(main_bp)
         app.register_blueprint(auth_bp, url_prefix='/auth')
         app.register_blueprint(admin_bp, url_prefix='/admin')
-        app.register_blueprint(api_bp, url_prefix='/api')
+        app.register_blueprint(api_bp)
+
+        csrf.exempt(api_bp)
 
     @app.after_request
     def add_security_headers(response):
