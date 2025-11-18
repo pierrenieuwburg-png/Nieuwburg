@@ -5,6 +5,37 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.types import JSON
 from datetime import datetime, date, time
+from itsdangerous import URLSafeTimedSerializer as Serializer # Added for tokens
+from flask import current_app # Added for tokens
+
+# ---
+# 1. NEW TENANT MODEL
+# ---
+class Tenant(db.Model):
+    __tablename__ = 'tenant'
+    id = db.Column(db.Integer, primary_key=True)
+    business_name = db.Column(db.String(100), nullable=False)
+    subscription_plan = db.Column(db.String(50), nullable=False) 
+    paystack_reference = db.Column(db.String(100), unique=True, nullable=True)
+    is_active = db.Column(db.Boolean, default=False, nullable=False) 
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # --- Relationships ---
+    users = db.relationship('User', back_populates='tenant', lazy=True)
+    business_settings = db.relationship('BusinessSettings', back_populates='tenant', uselist=False, cascade="all, delete-orphan")
+    quotes = db.relationship('Quote', back_populates='tenant', lazy=True)
+    invoices = db.relationship('Invoice', back_populates='tenant', lazy=True)
+    clients = db.relationship('Profile', back_populates='tenant', lazy=True)
+    service_categories = db.relationship('ServiceCategory', back_populates='tenant', lazy=True)
+    service_items = db.relationship('ServiceItem', back_populates='tenant', lazy=True)
+    service_clauses = db.relationship('ServiceClause', back_populates='tenant', lazy=True)
+    quote_requests = db.relationship('QuoteRequest', back_populates='tenant', lazy=True)
+    jobs = db.relationship('Job', back_populates='tenant', lazy=True)
+    posts = db.relationship('Post', back_populates='tenant', lazy=True)
+    activities = db.relationship('ActivityLog', back_populates='tenant', lazy=True)
+    
+    def __repr__(self):
+        return f'<Tenant {self.business_name}>'
 
 # --- Association Tables ---
 job_staff_association = db.Table('job_staff_association',
@@ -12,38 +43,40 @@ job_staff_association = db.Table('job_staff_association',
     db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True)
 )
 
-# === NEW: Association table for Services and T&C Clauses ===
 service_clauses_association = db.Table('service_clauses_association',
     db.Column('service_item_id', db.Integer, db.ForeignKey('service_item.id'), primary_key=True),
     db.Column('service_clause_id', db.Integer, db.ForeignKey('service_clause.id'), primary_key=True)
 )
-# === END OF NEW CODE ===
-
 
 # --- Main Models ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(100), unique=True, nullable=True)
-    password_hash = db.Column(db.String(128))
+    password_hash = db.Column(db.String(256)) # Increased length from 128
     role = db.Column(db.String(20), nullable=False, default='client')
     
     password_reset_required = db.Column(db.Boolean, default=False)
-    is_confirmed = db.Column(db.Boolean, nullable=False, default=False)
+    
+    # --- MODIFICATION: This is our "inactive" flag ---
+    is_confirmed = db.Column(db.Boolean, nullable=False, default=False) 
+    
     confirmed_on = db.Column(db.DateTime, nullable=True)
-
     failed_login_attempts = db.Column(db.Integer, default=0)
     locked_until = db.Column(db.DateTime, nullable=True)
     last_failed_login = db.Column(db.DateTime, nullable=True)
-    
     referral_code = db.Column(db.String(10), unique=True, nullable=True)
     referral_points = db.Column(db.Integer, default=0)
 
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
+    tenant = db.relationship('Tenant', back_populates='users')
+    # --- END NEW TENANCY FIELDS ---
+
     # Relationships
-    profile = db.relationship('Profile', backref='user', uselist=False, cascade="all, delete-orphan")
-    #quote_requests = db.relationship('QuoteRequest', lazy=True, cascade="all, delete-orphan")
+    profile = db.relationship('Profile', back_populates='user', uselist=False, cascade="all, delete-orphan")
     quote_requests = db.relationship('QuoteRequest', back_populates='user', lazy=True)
-    quotes = db.relationship('Quote', backref='user', lazy=True, cascade="all, delete-orphan")
-    invoices = db.relationship('Invoice', backref='user', lazy=True, cascade="all, delete-orphan")
+    quotes = db.relationship('Quote', back_populates='user', lazy=True, cascade="all, delete-orphan")
+    invoices = db.relationship('Invoice', back_populates='user', lazy=True, cascade="all, delete-orphan")
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -52,6 +85,20 @@ class User(UserMixin, db.Model):
         if not self.password_hash:
             return False
         return check_password_hash(self.password_hash, password)
+
+    # --- ADDED: Token Methods (re-using your auth logic) ---
+    def get_confirmation_token(self, salt='email-confirm-salt'):
+        s = Serializer(current_app.config['SECRET_KEY'])
+        return s.dumps(self.email, salt=salt)
+
+    @staticmethod
+    def verify_confirmation_token(token, salt='email-confirm-salt', max_age=3600):
+        s = Serializer(current_app.config['SECRET_KEY'])
+        try:
+            email = s.loads(token, salt=salt, max_age=max_age)
+        except:
+            return None
+        return User.query.filter_by(email=email).first()
 
 class Profile(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -75,6 +122,14 @@ class Profile(db.Model):
     account_number = db.Column(db.String(50))
     account_type = db.Column(db.String(50))
 
+    # --- MODIFIED: Changed backref to back_populates ---
+    user = db.relationship('User', back_populates='profile', foreign_keys=[user_id])
+    
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True) # Nullable for existing clients
+    tenant = db.relationship('Tenant', back_populates='clients')
+    # --- END NEW TENANCY FIELDS ---
+
 class QuoteRequest(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     property_type = db.Column(db.String(50), nullable=True) 
@@ -86,20 +141,22 @@ class QuoteRequest(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     user = db.relationship('User', back_populates='quote_requests')
     
-    # Fields used by specialized quote form / contact form
     name = db.Column(db.String(150), nullable=True) 
     email = db.Column(db.String(150), nullable=True)
     phone = db.Column(db.String(50), nullable=True)
-    address = db.Column(db.String(255), nullable=True) # Single definition
+    address = db.Column(db.String(255), nullable=True) 
     subject = db.Column(db.String(150), nullable=True) 
-    description = db.Column(db.Text, nullable=True) # Use this for the 'message'
+    description = db.Column(db.Text, nullable=True) 
 
-    # Common fields
     request_date = db.Column(db.DateTime, default=datetime.utcnow) 
-    status = db.Column(db.String(50), default='Pending') # Unified status field
+    status = db.Column(db.String(50), default='Pending') 
 
-    # Relationships
     job = db.relationship('Job', back_populates='quote_request', uselist=False)
+
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
+    tenant = db.relationship('Tenant', back_populates='quote_requests')
+    # --- END NEW TENANCY FIELDS ---
 
 class Quote(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -119,13 +176,18 @@ class Quote(db.Model):
     guest_address = db.Column(db.Text)
     payment_token = db.Column(db.String(100), unique=True, nullable=True)
     deposit_paid = db.Column(db.Boolean, default=False)
-    line_items = db.relationship('QuoteLineItem', backref='quote', lazy=True, cascade="all, delete-orphan")
-
-    # === NEW: Fields for per-quote settings ===
+    line_items = db.relationship('QuoteLineItem', back_populates='quote', lazy=True, cascade="all, delete-orphan")
     business_address = db.Column(db.String(500), nullable=True)
     registration_number = db.Column(db.String(100), nullable=True)
     terms_and_conditions = db.Column(db.Text, nullable=True)
-    # === END OF NEW CODE ===
+
+    # --- MODIFIED: Changed backref to back_populates ---
+    user = db.relationship('User', back_populates='quotes')
+    
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
+    tenant = db.relationship('Tenant', back_populates='quotes')
+    # --- END NEW TENANCY FIELDS ---
 
 class QuoteLineItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -134,6 +196,11 @@ class QuoteLineItem(db.Model):
     unit_price = db.Column(db.Float, nullable=False)
     amount = db.Column(db.Float, nullable=False)
     quote_id = db.Column(db.Integer, db.ForeignKey('quote.id'), nullable=False)
+    service_item_id = db.Column(db.Integer, db.ForeignKey('service_item.id'), nullable=True)
+    
+    # --- MODIFIED: Changed backref to back_populates ---
+    quote = db.relationship('Quote', back_populates='line_items')
+    service_item = db.relationship('ServiceItem', back_populates='quote_line_items')
 
 class Invoice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -145,8 +212,19 @@ class Invoice(db.Model):
     discount_value = db.Column(db.Float, default=0.0)
     discount_type = db.Column(db.String(10), default='R')
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    client = db.relationship('User', overlaps="invoices,user")
-    line_items = db.relationship('InvoiceLineItem', backref='invoice_list', lazy=True, cascade="all, delete-orphan")
+    status = db.Column(db.String(50), default='Unpaid', nullable=False)
+    payment_reference = db.Column(db.String(100), unique=True, nullable=True)
+    payment_token = db.Column(db.String(100), unique=True, nullable=True)
+    
+    # --- MODIFIED: Changed relationships ---
+    client = db.relationship('User', overlaps="invoices,user", foreign_keys=[user_id]) # Kept your overlaps
+    user = db.relationship('User', back_populates='invoices', foreign_keys=[user_id]) # Added back_populates
+    line_items = db.relationship('InvoiceLineItem', back_populates='invoice', lazy=True, cascade="all, delete-orphan")
+    
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
+    tenant = db.relationship('Tenant', back_populates='invoices')
+    # --- END NEW TENANCY FIELDS ---
 
 class InvoiceLineItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -155,6 +233,9 @@ class InvoiceLineItem(db.Model):
     unit_price = db.Column(db.Float, nullable=False)
     amount = db.Column(db.Float, nullable=False)
     invoice_id = db.Column(db.Integer, db.ForeignKey('invoice.id'), nullable=False)
+    
+    # --- MODIFIED: Changed backref to back_populates ---
+    invoice = db.relationship('Invoice', back_populates='line_items')
 
 class Job(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -166,11 +247,16 @@ class Job(db.Model):
     quote_request_id = db.Column(db.Integer, db.ForeignKey('quote_request.id'), nullable=True)
     quote_request = db.relationship('QuoteRequest', back_populates='job')
     assigned_staff = db.relationship('User', secondary=job_staff_association, lazy='subquery',
-    backref=db.backref('jobs_assigned', lazy=True))
+        backref=db.backref('jobs_assigned', lazy=True))
     service_id = db.Column(db.Integer, db.ForeignKey('service_item.id'), nullable=True)
-    service = db.relationship('ServiceItem', backref=db.backref('jobs', lazy=True))
+    service = db.relationship('ServiceItem', back_populates='jobs')
     client_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     client = db.relationship('User', foreign_keys=[client_id], backref=db.backref('jobs_as_client', lazy=True))
+    
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
+    tenant = db.relationship('Tenant', back_populates='jobs')
+    # --- END NEW TENANCY FIELDS ---
 
 class BusinessSettings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -179,16 +265,20 @@ class BusinessSettings(db.Model):
     registration_number = db.Column(db.String(100), default="2025/123456/07")
     default_terms = db.Column(db.Text, default="1. All payments are due within 30 days.\n2. ...")
     
-    # We will add the T&C clause library here in Step 2
+    # --- NEW TENANCY FIELDS (1-to-1) ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True, unique=True) # Start as nullable, wizard will set it
+    tenant = db.relationship('Tenant', back_populates='business_settings')
+    # --- END NEW TENANCY FIELDS ---
     
     @staticmethod
     def get_settings():
         """A helper to get the first (and only) settings row."""
+        # This will be updated later to be tenant-aware.
         settings = BusinessSettings.query.first()
         if not settings:
-            settings = BusinessSettings()
-            db.session.add(settings)
-            db.session.commit()
+            # We can't create one without a tenant_id, so we'll just return a default object
+            # The setup wizard will create the real one.
+            return BusinessSettings() # Return a transient, default object
         return settings
 
 class ServiceClause(db.Model):
@@ -196,13 +286,16 @@ class ServiceClause(db.Model):
     name = db.Column(db.String(255), nullable=False)  
     text = db.Column(db.Text, nullable=False)
 
-    # === NEW: Link to ServiceItem (many-to-many) ===
     service_items = db.relationship(
         'ServiceItem', 
         secondary=service_clauses_association,
         back_populates='linked_clauses'
     )
-    # === END OF NEW CODE ===
+    
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
+    tenant = db.relationship('Tenant', back_populates='service_clauses')
+    # --- END NEW TENANCY FIELDS ---
 
     def to_dict(self):
         return {
@@ -220,36 +313,54 @@ class StaffApplication(db.Model):
     address = db.Column(db.Text)
     submission_date = db.Column(db.DateTime, default=datetime.utcnow)
     document_filenames = db.Column(JSON, nullable=True)
+    # This model remains non-tenanted
 
 class ServiceCategory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True)
     description = db.Column(db.Text, nullable=True)
     calculation_method = db.Column(db.String(50), nullable=False, default='options')
-    items = db.relationship('ServiceItem', backref='category', lazy=True, cascade="all, delete-orphan")
+    items = db.relationship('ServiceItem', back_populates='category', lazy=True, cascade="all, delete-orphan")
+
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
+    tenant = db.relationship('Tenant', back_populates='service_categories')
+    # --- END NEW TENANCY FIELDS ---
 
 class ServiceItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     estimated_time_mins = db.Column(db.Integer, default=0)
     category_id = db.Column(db.Integer, db.ForeignKey('service_category.id'), nullable=False)
-    prices = db.relationship('ServicePrice', backref='service_item', lazy=True, cascade="all, delete-orphan")
+    prices = db.relationship('ServicePrice', back_populates='service_item', lazy=True, cascade="all, delete-orphan")
     
-    # === NEW: Link to ServiceClause (many-to-many) ===
+    # --- MODIFIED: Changed backref to back_populates ---
+    category = db.relationship('ServiceCategory', back_populates='items')
+    quote_line_items = db.relationship('QuoteLineItem', back_populates='service_item')
+    jobs = db.relationship('Job', back_populates='service')
+    
     linked_clauses = db.relationship(
         'ServiceClause',
         secondary=service_clauses_association,
         back_populates='service_items'
     )
-    # === END OF NEW CODE ===
+    
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
+    tenant = db.relationship('Tenant', back_populates='service_items')
+    # --- END NEW TENANCY FIELDS ---
 
 class ServicePrice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     frequency = db.Column(db.String(50), nullable=False)
     price = db.Column(db.Float, nullable=False, default=0.0)
     service_item_id = db.Column(db.Integer, db.ForeignKey('service_item.id'), nullable=False)
+    
+    # --- MODIFIED: Changed backref to back_populates ---
+    service_item = db.relationship('ServiceItem', back_populates='prices')
 
 class Booking(db.Model):
+    # This model seems to be from the old system and is replaced by QuoteRequest/Job
     id = db.Column(db.Integer, primary_key=True)
     customer_name = db.Column(db.String(100), nullable=False)
     customer_email = db.Column(db.String(100), nullable=False)
@@ -273,6 +384,11 @@ class Post(db.Model):
     author = db.relationship('User', backref=db.backref('posts', lazy=True))
     is_published = db.Column(db.Boolean, default=False, nullable=False)
 
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
+    tenant = db.relationship('Tenant', back_populates='posts')
+    # --- END NEW TENANCY FIELDS ---
+
 class ActivityLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
@@ -280,6 +396,11 @@ class ActivityLog(db.Model):
     description = db.Column(db.Text, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     user = db.relationship('User', backref=db.backref('activities', lazy=True))
+    
+    # --- NEW TENANCY FIELDS ---
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
+    tenant = db.relationship('Tenant', back_populates='activities')
+    # --- END NEW TENANCY FIELDS ---
 
 class Settings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -289,6 +410,7 @@ class Settings(db.Model):
 
 # --- Helper Functions ---
 def get_next_quote_number():
+    # This will need to be made tenant-aware in Phase 3
     last_quote = Quote.query.order_by(Quote.id.desc()).first()
     if not last_quote or '-' not in last_quote.quote_number:
         return "QU-0051"
@@ -300,6 +422,7 @@ def get_next_quote_number():
         return "QU-0051"
 
 def get_next_invoice_number():
+    # This will need to be made tenant-aware in Phase 3
     last_invoice = Invoice.query.order_by(Invoice.id.desc()).first()
     if not last_invoice or '-' not in last_invoice.invoice_number:
         return "INV-0061"

@@ -11,17 +11,23 @@
         </div>
         <div style="padding: 30px; color: #333; line-height: 1.6; font-size: 16px;">
             <h2 style="font-family: 'Oswald', sans-serif; color: #111; margin-top: 0;">Welcome Aboard!</h2>
-            <p>Thank you for your booking! To access your new client dashboard and manage your service, please create a password by clicking the button below:</p>
+            
+            <!-- NEW: Updated text as you requested -->
+            <p>Thank you for signing up. Click the link below to confirm your email, and we'll get you set up and started.</p>
             
             <div style="text-align: center; margin: 30px 0;">
-                <a href="{{ set_password_url }}" style="display: inline-block; padding: 12px 25px; background-color: #006ac6; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">Create My Password</a>
+                <!-- FIX: Use `confirm_url` and update button text -->
+                <a href="{{ confirm_url }}" style="display: inline-block; padding: 12px 25px; background-color: #006ac6; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">
+                    Confirm Your Email & Get Started
+                </a>
             </div>
             
             <p style="font-size: 12px; color: #888;">If you cannot click the button, please copy and paste the following link into your browser:</p>
-            <p style="font-size: 12px; color: #888; word-break: break-all;"><a href="{{ set_password_url }}" style="color: #006ac6;">{{ set_password_url }}</a></p>
+            <!-- FIX: Use `confirm_url` -->
+            <p style="font-size: 12px; color: #888; word-break: break-all;"><a href="{{ confirm_url }}" style="color: #006ac6;">{{ confirm_url }}</a></p>
         </div>
         <div style="text-align: center; padding: 20px; font-size: 12px; color: #888; background-color: #f9f9f9; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;">
-            <p style="margin: 0;">&copy; {{ now.year }} Nieuwburg Blitz Cleaning Services</p>
+            <p style="margin: 0;">&copy; {{ now.year }} Nieuwburg Blitz</p>
         </div>
     </div>
 </body>

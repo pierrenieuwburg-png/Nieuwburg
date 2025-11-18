@@ -3,7 +3,7 @@
 {% block content %}
 <section class="hero-section">
     <h1 class="hero-title">The Help You Need,<br>Without The Hassle.</h1>
-    <p class="hero-subtitle">Cape Town's trusted, supervised, and fully-equipped residential and commercial maintenance teams, ready when you are.</p>
+    <p class="hero-subtitle">Cape Town's trusted, vetted and fully-equipped contractors,<br>ready when you are.</p>
     
     <div class="services-grid">
         <a href="#" class="service-item service-item-book-button">
@@ -11,7 +11,7 @@
             <span>Indoor Cleaning</span>
         </a>
         <a href="#" class="service-item service-item-book-button">
-             <div class="service-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg></div>
+            <div class="service-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg></div>
             <span>Deep Cleaning</span>
         </a>
         <a href="#" class="service-item service-item-book-button">
@@ -137,6 +137,7 @@
         </div>
     </div>
 </section>
+
 <section class="referral-section">
     <div class="container referral-container">
         <div class="referral-content">
@@ -149,6 +150,7 @@
         </div>
     </div>
 </section>
+
 <section class="placements-section">
     <div class="container">
         <div class="section-header">
@@ -166,7 +168,7 @@
             </div>
             <div class="placement-card">
                 <div class="placement-icon">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a4.5 4.5 0 0 0-4.5 4.5c0 1.33.62 2.5 1.53 3.22"/><path d="M12 1a4.5 4.5 0 0 1 4.5 4.5c0 1.33-.62 2.5-1.53 3.22"/><path d="M5 10a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1Z"/><path d="M12 15v7"/><path d="M12 15a4 4 0 0 0-4 4h8a4 4 0 0 0-4-4Z"/></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a4.5 4.5 0 0 0-4.5 4.5c0 1.33.62 2.5 1.53 3.22"/><path d="M12 1a4.5 4.5 0 0 1 4.5 4.5c0 1.33-.62 2.5-1.53 3.22"/><path d="M5 10a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1Z"/><path d_ ="M12 15v7"/><path d="M12 15a4 4 0 0 0-4 4h8a4 4 0 0 0-4-4Z"/></svg>
                 </div>
                 <h3>Full-Time Nanny</h3>
                 <p>Trustworthy and caring support for your children and family's needs.</p>
@@ -192,7 +194,7 @@
             <a href="{{ url_for('main.blitz_dock') }}" class="cta">Explore The Blitz Dock</a>
         </div>
         <div class="client-hub-image">
-            <img src="https://placehold.co/600x450/e5e7eb/FFFFFF?text=Client+Hub+Mockup" alt="Client Hub dashboard on a device">
+            <img src="httpsB://placehold.co/600x450/e5e7eb/FFFFFF?text=Client+Hub+Mockup" alt="Client Hub dashboard on a device">
         </div>
     </div>
 </section>
@@ -211,6 +213,77 @@
 
         <div style="text-align: center; margin-top: 40px;">
              <a href="{{ url_for('main.blog') }}" class="cta-outline">View All Posts</a>
+        </div>
+    </div>
+</section>
+
+<section class="pricing-section" id="pricing-section">
+    <div class="container">
+        
+        <div class="section-header">
+            <h2 class="section-title">Find the Perfect Plan for Your Business</h2>
+            <p class="section-subtitle">
+                From solo entrepreneurs to growing teams, our "Business-in-a-Box" has a plan that scales with you.
+            </p>
+        </div>
+
+        <div class="pricing-grid">
+
+            <div class="pricing-card">
+                <h3 class="pricing-title">Basic</h3>
+                <p class="pricing-subtitle">For individuals and new businesses</p>
+                <div class="pricing-price">
+                    R 499 <span class="price-per">/ mo</span>
+                </div>
+                <p class="pricing-desc">Get your core operations online and automated.</p>
+                <ul class="pricing-features">
+                    <li><i class="fa fa-check"></i> Smart Quoting System</li>
+                    <li><i class="fa fa-check"></i> Invoicing & Payments</li>
+                    <li><i class="fa fa-check"></i> Client Management (CRM)</li>
+                    <li><i class="fa fa-check"></i> Public "Blitz Marketplace" Profile</li>
+                    <li style="opacity: 0.5;"><i class="fa fa-times"></i> Staff Portal & Job Scheduling</li>
+                    <li style="opacity: 0.5;"><i class="fa fa-times"></i> Multi-User Admin Access</li>
+                </ul>
+                <a href="{{ url_for('main.subscribe', plan_type='basic') }}" class="cta-outline">Get Started</a>
+            </div>
+
+            <div class="pricing-card featured">
+                <div class="popular-badge">Most Popular</div>
+                <h3 class="pricing-title">Pro</h3>
+                <p class="pricing-subtitle">For established and growing teams</p>
+                <div class="pricing-price">
+                    R 1299 <span class="price-per">/ mo</span>
+                </div>
+                <p class="pricing-desc">The complete "Business-in-a-Box" solution.</p>
+                <ul class="pricing-features">
+                    <li><i class="fa fa-check"></i> Smart Quoting System</li>
+                    <li><i class="fa fa-check"></i> Invoicing & Payments</li>
+                    <li><i class="fa fa-check"></i> Client Management (CRM)</li>
+                    <li><i class="fa fa-check"></i> Public "Blitz Marketplace" Profile</li>
+                    <li><i class="fa fa-check"></i> Staff Portal & Job Scheduling</li>
+                    <li><i class="fa fa-check"></i> Multi-User Admin Access</li>
+                </ul>
+                <a href="{{ url_for('main.subscribe', plan_type='pro') }}" class="cta">Get Started</a>
+            </div>
+
+            <div class="pricing-card">
+                <h3 class="pricing-title">Intermediate</h3>
+                <p class="pricing-subtitle">For small teams needing more</p>
+                <div class="pricing-price">
+                    R 899 <span class="price-per">/ mo</span>
+                </div>
+                <p class="pricing-desc">Unlock powerful scheduling and team tools.</p>
+                <ul class="pricing-features">
+                    <li><i class="fa fa-check"></i> Smart Quoting System</li>
+                    <li><i class="fa fa-check"></i> Invoicing & Payments</li>
+                    <li><i class="fa fa-check"></i> Client Management (CRM)</li>
+                    <li><i class="fa fa-check"></i> Public "Blitz Marketplace" Profile</li>
+                    <li><i class="fa fa-check"></i> Staff Portal & Job Scheduling</li>
+                    <li style="opacity: 0.5;"><i class="fa fa-times"></i> Multi-User Admin Access</li>
+                </ul>
+                <a href="{{ url_for('main.subscribe', plan_type='intermediate') }}" class="cta-outline">Get Started</a>
+            </div>
+
         </div>
     </div>
 </section>

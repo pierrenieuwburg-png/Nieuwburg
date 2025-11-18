@@ -1,9 +1,16 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+import os
+import requests
+import traceback
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, jsonify
 from flask_login import login_required, current_user
-from .. import db
-from ..models import Post, User, Quote, Invoice, QuoteRequest, Job
-from ..forms import PlacementApplicationForm
+from flask_mail import Message
 from datetime import date
+
+from .. import db, mail
+from ..models import Post, User, Quote, Invoice, QuoteRequest, Job, Tenant
+from ..forms import PlacementApplicationForm
+from .auth import generate_confirmation_token
+from .utils import send_async_email
 
 bp = Blueprint('main', __name__)
 
@@ -42,6 +49,17 @@ def blitz_dock():
 def about_us():
     return render_template('public/about.html')
 
+@bp.route('/pricing')
+def pricing():
+    return render_template('public/pricing.html')
+
+@bp.route('/subscribe/<plan_type>')
+def subscribe(plan_type):
+    if plan_type not in ['basic', 'intermediate', 'pro']:
+        flash('Invalid subscription plan.', 'error')
+        return redirect(url_for('main.index', _anchor='pricing-section'))
+    return render_template('public/subscribe.html', plan_type=plan_type)
+
 # --- Placements Routes ---
 
 @bp.route('/placements/housekeeper')
@@ -62,7 +80,6 @@ def placement_apply(service_type):
         return redirect(url_for('main.index'))
     form = PlacementApplicationForm()
     if form.validate_on_submit():
-        # In a real app, you would send an email here
         flash('Thank you for your application! We will be in contact with you shortly.', 'success')
         return redirect(url_for('main.index'))
     return render_template('placements/placement_apply.html', form=form, service_type=service_type)
@@ -106,3 +123,164 @@ def staff_dashboard():
     past_jobs = [j for j in assigned_jobs if j.scheduled_date < today]
 
     return render_template('staff/staff_dashboard.html', upcoming_jobs=upcoming_jobs, past_jobs=past_jobs)
+
+
+# --- Payment & Invoicing Routes (New) ---
+
+@bp.route('/invoice/pay/<token>')
+def public_invoice_pay(token):
+    """
+    Public page for a client to view and pay their invoice.
+    """
+    invoice = Invoice.query.filter_by(payment_token=token).first()
+    
+    if not invoice:
+        return render_template('public/error.html', message="Invoice not found or invalid link."), 404
+        
+    paystack_key = os.environ.get('PAYSTACK_PUBLIC_KEY')
+    
+    # Get Tenant details for display
+    tenant = Tenant.query.get(invoice.tenant_id)
+    business_name = tenant.business_name if tenant else "Nieuwburg Blitz"
+
+    return render_template(
+        'public/pay_invoice.html', 
+        invoice=invoice, 
+        paystack_key=paystack_key,
+        business_name=business_name
+    )
+
+@bp.route('/api/invoice/initiate-payment', methods=['POST'])
+def initiate_invoice_payment():
+    """
+    Called by the frontend to start a Paystack transaction for an INVOICE.
+    """
+    data = request.json
+    token = data.get('token')
+    email = data.get('email') 
+    
+    invoice = Invoice.query.filter_by(payment_token=token).first()
+    if not invoice:
+        return jsonify({'message': 'Invalid invoice'}), 404
+
+    if invoice.status == 'Paid':
+        return jsonify({'message': 'Invoice is already paid'}), 400
+
+    try:
+        paystack_secret = os.environ.get('PAYSTACK_SECRET_KEY')
+        url = "https://api.paystack.co/transaction/initialize"
+        headers = {
+            "Authorization": f"Bearer {paystack_secret}",
+            "Content-Type": "application/json"
+        }
+        
+        amount_cents = int(invoice.total * 100)
+        
+        payload = {
+            "email": email,
+            "amount": amount_cents,
+            "callback_url": url_for('main.payment_callback', _external=True),
+            "metadata": {
+                "type": "invoice_payment",
+                "invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number
+            }
+        }
+        
+        response = requests.post(url, headers=headers, json=payload)
+        response_data = response.json()
+        
+        if not response_data['status']:
+            raise Exception(response_data['message'])
+
+        # Save reference
+        invoice.payment_reference = response_data['data']['reference']
+        db.session.commit()
+
+        return jsonify({
+            'authorization_url': response_data['data']['authorization_url']
+        })
+
+    except Exception as e:
+        print(f"Invoice Payment Init Error: {e}")
+        return jsonify({'message': 'Could not initialize payment'}), 500
+
+
+@bp.route('/payment/callback')
+def payment_callback():
+    """
+    Unified Callback: Handles both SaaS Subscriptions AND Invoice Payments.
+    """
+    reference = request.args.get('reference')
+    if not reference:
+        flash('Invalid payment reference.', 'error')
+        return redirect(url_for('main.index'))
+
+    paystack_secret = os.environ.get('PAYSTACK_SECRET_KEY')
+    verify_url = f"https://api.paystack.co/transaction/verify/{reference}"
+    headers = {"Authorization": f"Bearer {paystack_secret}"}
+
+    try:
+        response = requests.get(verify_url, headers=headers)
+        data = response.json()
+
+        if not (data.get('status') and data['data']['status'] == 'success'):
+            flash('Payment failed.', 'error')
+            return redirect(url_for('main.index'))
+
+        # --- DETERMINE PAYMENT TYPE ---
+        metadata = data['data'].get('metadata', {})
+        payment_type = metadata.get('type')
+
+        if payment_type == 'invoice_payment':
+            # --- HANDLE INVOICE PAYMENT ---
+            invoice_id = metadata.get('invoice_id')
+            invoice = db.session.get(Invoice, invoice_id)
+            
+            if invoice:
+                invoice.status = 'Paid'
+                invoice.payment_reference = reference
+                db.session.commit()
+                
+                flash(f'Payment successful! Invoice {invoice.invoice_number} is now Paid.', 'success')
+                return redirect(url_for('main.public_invoice_pay', token=invoice.payment_token))
+            else:
+                 flash('Invoice not found.', 'error')
+                 return redirect(url_for('main.index'))
+
+        else:
+            # --- HANDLE SAAS SUBSCRIPTION ---
+            tenant = Tenant.query.filter_by(paystack_reference=reference).first()
+            if tenant:
+                user = User.query.filter_by(tenant_id=tenant.id, role='admin').first()
+                if user and not user.is_confirmed:
+                    token = generate_confirmation_token(user.email)
+                    confirm_url = url_for('auth.confirm_email', token=token, _external=True)
+                    logo_url = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
+                    
+                    msg = Message(
+                        subject="[Nieuwburg Blitz] Activate Your Account",
+                        sender=current_app.config['MAIL_USERNAME'],
+                        recipients=[user.email]
+                    )
+                    msg.html = render_template(
+                        'email/welcome_activate.html', 
+                        confirm_url=confirm_url, 
+                        logo_url=logo_url, 
+                        business_name=tenant.business_name
+                    )
+                    send_async_email(current_app._get_current_object(), msg)
+                    return redirect(url_for('main.check_email'))
+            
+            flash('Payment verified.', 'success')
+            return redirect(url_for('main.index'))
+
+    except Exception as e:
+        print(f"Callback Error: {e}")
+        flash('An error occurred verifying payment.', 'error')
+        return redirect(url_for('main.index'))
+
+
+@bp.route('/check-email')
+def check_email():
+    return render_template('public/check_email.html')

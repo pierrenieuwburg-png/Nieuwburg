@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Our Plans - Nieuwburg Blitz{% endblock %}
+
+{% block content %}
+<main>
+    <section class="hero-section" style="padding-bottom: 60px;">
+        <div class="container">
+            <a href="{{ url_for('main.index') }}" style="color: var(--text-light); text-decoration: none; font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 15px;">‹ Back to Home</a>
+            <h1 class="hero-title">Find the Perfect Plan for Your Business</h1>
+            <p class="hero-subtitle">
+                From solo entrepreneurs to growing teams, our "Business-in-a-Box" has a plan that scales with you.
+            </p>
+        </div>
+    </section>
+
+    <section class="pricing-section">
+        <div class="container">
+            <div class="pricing-grid">
+
+                <div class="pricing-card">
+                    <h3 class="pricing-title">Basic</h3>
+                    <p class="pricing-subtitle">For individuals and new businesses</p>
+                    <div class="pricing-price">
+                        R 499 <span class="price-per">/ mo</span>
+                    </div>
+                    <p class="pricing-desc">Get your core operations online and automated.</p>
+                    <ul class="pricing-features">
+                        <li><i class="fa fa-check"></i> Smart Quoting System</li>
+                        <li><i class="fa fa-check"></i> Invoicing & Payments</li>
+                        <li><i class="fa fa-check"></i> Client Management (CRM)</li>
+                        <li><i class="fa fa-check"></i> Public "Blitz Marketplace" Profile</li>
+                        <li><i class="fa fa-times"></i> Staff Portal & Job Scheduling</li>
+                        <li><i class="fa fa-times"></i> Multi-User Admin Access</li>
+                    </ul>
+                    <a href="{{ url_for('auth.show_register') }}" class="cta-outline">Get Started</a>
+                </div>
+
+                <div class="pricing-card featured">
+                    <div class="popular-badge">Most Popular</div>
+                    <h3 class="pricing-title">Pro</h3>
+                    <p class="pricing-subtitle">For established and growing teams</p>
+                    <div class="pricing-price">
+                        R 1299 <span class="price-per">/ mo</span>
+                    </div>
+                    <p class="pricing-desc">The complete "Business-in-a-Box" solution.</p>
+                    <ul class="pricing-features">
+                        <li><i class="fa fa-check"></i> Smart Quoting System</li>
+                        <li><i class="fa fa-check"></i> Invoicing & Payments</li>
+                        <li><i class="fa fa-check"></i> Client Management (CRM)</li>
+                        <li><i class="fa fa-check"></i> Public "Blitz Marketplace" Profile</li>
+                        <li><i class="fa fa-check"></i> Staff Portal & Job Scheduling</li>
+                        <li><i class="fa fa-check"></i> Multi-User Admin Access</li>
+                    </ul>
+                    <a href="{{ url_for('auth.show_register') }}" class="cta">Get Started</a>
+                </div>
+
+                <div class="pricing-card">
+                    <h3 class="pricing-title">Intermediate</h3>
+                    <p class="pricing-subtitle">For small teams needing more</p>
+                    <div class="pricing-price">
+                        R 899 <span class="price-per">/ mo</span>
+                    </div>
+                    <p class="pricing-desc">Unlock powerful scheduling and team tools.</p>
+                    <ul class="pricing-features">
+                        <li><i class="fa fa-check"></i> Smart Quoting System</li>
+                        <li><i class="fa fa-check"></i> Invoicing & Payments</li>
+                        <li><i class="fa fa-check"></i> Client Management (CRM)</li>
+                        <li><i class="fa fa-check"></i> Public "Blitz Marketplace" Profile</li>
+                        <li><i class="fa fa-check"></i> Staff Portal & Job Scheduling</li>
+                        <li><i class="fa fa-times"></i> Multi-User Admin Access</li>
+                    </ul>
+                    <a href="{{ url_for('auth.show_register') }}" class="cta-outline">Get Started</a>
+                </div>
+
+            </div>
+        </div>
+    </section>
+</main>
+{% endblock %}

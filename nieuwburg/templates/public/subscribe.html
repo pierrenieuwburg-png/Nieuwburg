@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Subscribe to {{ plan_type|title }} - Nieuwburg Blitz{% endblock %}
+
+{% block content %}
+<section class="container" style="padding-top: 60px; padding-bottom: 80px; max-width: 500px;">
+    
+    <div style="text-align: center; margin-bottom: 30px;">
+        <a href="{{ url_for('main.index', _anchor='pricing-section') }}" style="color: var(--text-light); text-decoration: none; font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 15px;">‹ Back to Plans</a>
+        <h1 class="section-title" style="margin-bottom: 10px;">Create Your Account</h1>
+        <p class="section-subtitle" style="margin: 0; max-width: 100%;">You're subscribing to the <strong style="color: var(--accent);">{{ plan_type|title }} Plan</strong>. Let's get your details.</p>
+    </div>
+
+    <form id="subscribe-form" class="auth-form-modal active" style="gap: 20px;">
+        
+        <input type="hidden" name="plan_type" value="{{ plan_type }}">
+
+        <div class="form-group">
+            <label for="full_name" class="form-label">Full Name</label>
+            <input type="text" id="full_name" name="full_name" class="form-control" placeholder="e.g. Jane Doe" required>
+        </div>
+
+        <div class="form-group">
+            <label for="business_name" class="form-label">Business Name</label>
+            <input type="text" id="business_name" name="business_name" class="form-control" placeholder="e.g. ACME Cleaning" required>
+        </div>
+
+        <div class="form-group">
+            <label for="email" class="form-label">Email Address</label>
+            <input type="email" id="email" name="email" class="form-control" placeholder="you@company.com" required>
+        </div>
+
+        <div class="form-group">
+            <label for="password" class="form-label">Create Password</label>
+            <input type="password" id="password" name="password" class="form-control" required>
+        </div>
+
+        <button type="submit" class="cta" style="width: 100%; margin-top: 10px;">
+            Proceed to Payment
+        </button>
+
+    </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const subscribeForm = document.getElementById('subscribe-form');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+
+    subscribeForm.addEventListener('submit', function(event) {
+        event.preventDefault(); // Stop the form from submitting normally
+        
+        const button = subscribeForm.querySelector('button[type="submit"]');
+        button.disabled = true;
+        button.textContent = 'Processing...';
+
+        // 1. Get all the data from the form
+        const formData = new FormData(subscribeForm);
+        const data = Object.fromEntries(formData.entries());
+
+        // 2. Call our new backend API endpoint
+        fetch('/api/subscription/initiate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.authorization_url) {
+                // 3. We got a Paystack URL! Redirect the user to it.
+                window.location.href = result.authorization_url;
+            } else {
+                // Handle errors
+                alert(result.message || 'An error occurred. Please try again.');
+                button.disabled = false;
+                button.textContent = 'Proceed to Payment';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('A network error occurred. Please try again.');
+            button.disabled = false;
+            button.textContent = 'Proceed to Payment';
+        });
+    });
+});
+</script>
+{% endblock %}

@@ -3589,3 +3589,364 @@ input.invalid-input {
   cursor: not-allowed;
   resize: none;
 }
+.checkbox-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px;
+  background: #f9fafb;
+}
+
+.checkbox-label {
+  display: block;
+  padding: 8px 10px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.checkbox-label:hover {
+  background-color: #f3f4f6;
+}
+
+.checkbox-label input {
+  margin-right: 10px;
+  transform: scale(1.1);
+  accent-color: #006ac6; /* Spec: Primary Accent */
+}
+.line-item-row-smart {
+  display: flex;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 15px;
+}
+
+/* 1. The Service Dropdown */
+.line-item-select {
+  width: 30%;
+  padding-right: 15px;
+  border-right: 1px solid #e5e7eb;
+}
+.line-item-select select {
+  font-weight: bold;
+}
+
+/* 2. The Manual Edit Fields */
+.line-item-details {
+  width: 70%;
+  padding-left: 15px;
+}
+.line-item-details textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+.line-item-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+.line-item-inputs .form-input:last-of-type {
+  background-color: #f3f4f6; /* Readonly total field */
+}
+.line-item-inputs button {
+  padding: 10px 15px;
+}
+
+/* =======================================
+   LOCKED SETTINGS SECTION
+   ======================================= */
+
+.locked-settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+}
+
+.locked-settings-header h2 {
+  margin: 0;
+  color: #6b7280; /* Spec: Text Light */
+}
+.locked-settings-section p {
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin-top: -10px;
+}
+
+/* --- Style the inputs when locked --- */
+.is-locked .form-input:read-only {
+  background: #f3f4f6;
+  color: #4b5563;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.is-locked textarea.form-input:read-only {
+  resize: none;
+}
+/* =======================================
+   SETTINGS PAGE - TAB NAVIGATION
+   ======================================= */
+
+.tabs-nav {
+  display: flex;
+  padding: 0; /* Remove padding from the admin-section */
+  margin-bottom: 0;
+  border-bottom: 2px solid #006ac6; /* Active tab border */
+  border-radius: 8px 8px 0 0;
+}
+
+.tabs-nav-button {
+  font-family: 'Oswald', sans-serif;
+  font-size: 1rem;
+  padding: 12px 20px;
+  margin-bottom: -2px; /* Pulls the button down to overlap the border */
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: none;
+  cursor: pointer;
+  color: #6b7280; /* Spec: Text Light */
+  transition: all 0.2s ease-in-out;
+}
+
+.tabs-nav-button:hover {
+  background-color: #f9fafb;
+  color: #1f2937;
+}
+
+.tabs-nav-button.active {
+  background: #ffffff;
+  color: #006ac6; /* Spec: Primary Accent */
+  border-color: #e5e7eb #e5e7eb #ffffff; /* Border to hide the container's bottom border */
+  border-radius: 6px 6px 0 0;
+  font-weight: 600;
+}
+
+.tabs-nav-button i {
+  margin-right: 8px;
+}
+
+.tab-content-pane {
+  padding-top: 10px;
+}
+/* =======================================
+   SMART LINE ITEM ROW STYLES
+   ======================================= */
+
+.line-item-row-smart {
+  display: flex;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 15px;
+}
+
+/* 1. The Service Dropdown */
+.line-item-select {
+  width: 30%;
+  padding-right: 15px;
+  border-right: 1px solid #e5e7eb;
+}
+.line-item-select select {
+  font-weight: bold;
+}
+
+/* 2. The Manual Edit Fields */
+.line-item-details {
+  width: 70%;
+  padding-left: 15px;
+}
+.line-item-details textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+.line-item-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+.line-item-inputs .form-input:last-of-type {
+  background-color: #f3f4f6; /* Readonly total field */
+}
+.line-item-inputs button {
+  padding: 10px 15px;
+}
+
+/* =======================================
+   LOCKED SETTINGS SECTION
+   ======================================= */
+
+.locked-settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+}
+
+.locked-settings-header h2 {
+  margin: 0;
+  color: #6b7280; /* Spec: Text Light */
+}
+.locked-settings-section p {
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin-top: -10px;
+}
+
+/* --- Style the inputs when locked --- */
+.is-locked .form-input:read-only {
+  background: #f3f4f6;
+  color: #4b5563;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.is-locked textarea.form-input:read-only {
+  resize: none;
+}
+/* =======================================
+   PRICING PAGE STYLES
+   ======================================= */
+
+.pricing-section {
+    padding: 80px 0; /* Added top padding */
+    background-color: white;
+}
+
+.pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 30px;
+    align-items: stretch; /* Makes cards same height */
+}
+
+.pricing-card {
+    background-color: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 35px 30px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px -5px rgba(0, 34, 68, 0.05);
+}
+
+.pricing-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 10px 25px -5px rgba(0, 34, 68, 0.1);
+}
+
+.pricing-title {
+    font-family: 'Oswald', sans-serif;
+    font-size: 1.8rem;
+    color: var(--primary-dark);
+    margin: 0 0 5px;
+}
+
+.pricing-subtitle {
+    font-size: 0.9rem;
+    color: var(--text-light);
+    margin: 0;
+}
+
+.pricing-price {
+    font-family: 'Oswald', sans-serif;
+    font-size: 3rem;
+    font-weight: 700;
+    color: var(--primary-dark);
+    margin: 25px 0;
+}
+
+.pricing-price .price-per {
+    font-size: 1rem;
+    font-weight: 400;
+    color: var(--text-light);
+}
+
+.pricing-desc {
+    font-size: 0.95rem;
+    color: var(--text-dark);
+    margin: 0 auto 25px;
+    max-width: 250px;
+}
+
+.pricing-features {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 30px;
+    text-align: left;
+}
+
+.pricing-features li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    color: var(--text-dark);
+    font-size: 0.95rem;
+}
+
+.pricing-features li i {
+    width: 18px;
+    text-align: center;
+}
+.pricing-features li .fa-check {
+    color: #28a745; /* Green check */
+}
+.pricing-features li .fa-times {
+    color: #dc3545; /* Red x */
+}
+
+.pricing-card .cta,
+.pricing-card .cta-outline {
+    width: 100%;
+    margin-top: auto;
+}
+
+/* Featured Plan */
+.pricing-card.featured {
+    border: 2px solid var(--accent);
+    transform: scale(1.03);
+    position: relative;
+}
+
+.popular-badge {
+    position: absolute;
+    top: -15px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: white;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 6px 15px;
+    border-radius: 20px;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .pricing-grid {
+        grid-template-columns: 1fr;
+    }
+    .pricing-card {
+        max-width: 450px;
+        margin: 0 auto;
+    }
+    .pricing-card.featured {
+        transform: scale(1); /* Don't scale on mobile */
+    }
+}

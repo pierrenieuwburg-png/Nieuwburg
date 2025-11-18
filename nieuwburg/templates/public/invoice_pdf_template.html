@@ -99,7 +99,9 @@
     {# Set the variables for the first page #}
     {% set doc_type = 'Invoice' %}
     {% set document = invoice %}
-    {% include '_pdf_view.html' %}
+    
+    {# --- FIX: Updated path to point to shared folder --- #}
+    {% include 'shared/_pdf_view.html' %}
 
     {# Add the new page for payment advice #}
     <div class="page-break"></div>

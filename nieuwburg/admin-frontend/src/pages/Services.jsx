@@ -1,107 +1,268 @@
 import React, { useState, useEffect } from 'react';
-import { BarLoader } from 'react-spinners'; // Or any loader you prefer
+import { BarLoader } from 'react-spinners';
 
-function Services() {
-  const [servicesData, setServicesData] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+// --- NEW: Edit Service Modal Component ---
+const EditServiceModal = ({ service, allClauses, onSave, onClose, csrfToken }) => {
+  const [name, setName] = useState('');
+  const [time, setTime] = useState(0);
+  const [selectedClauseIds, setSelectedClauseIds] = useState(new Set());
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
 
+  // Populate form when the 'service' prop changes
   useEffect(() => {
-  const fetchServices = async () => {
-    setIsLoading(true);
-    try {
-      // Use fetch directly, just like in your other components
-      const response = await fetch('/api/services'); // <-- This is the API endpoint
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      setServicesData(data); // Set the data from the response
+    if (service) {
+      setIsLoading(true);
       setError(null);
+      
+      // Fetch the full service details, including its linked clauses
+      fetch(`/api/admin/service-items/${service.id}`)
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch service details');
+          return res.json();
+        })
+        .then(data => {
+          setName(data.name);
+          setTime(data.estimated_time_mins);
+          setSelectedClauseIds(new Set(data.linked_clause_ids));
+        })
+        .catch(err => setError(err.message))
+        .finally(() => setIsLoading(false));
+    }
+  }, [service]);
 
+  const handleCheckboxChange = (clauseId) => {
+    const newSet = new Set(selectedClauseIds);
+    if (newSet.has(clauseId)) {
+      newSet.delete(clauseId);
+    } else {
+      newSet.add(clauseId);
+    }
+    setSelectedClauseIds(newSet);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsSaving(true);
+    setError(null);
+
+    const updatedServiceData = {
+      name: name,
+      estimated_time_mins: parseInt(time, 10) || 0,
+      linked_clause_ids: Array.from(selectedClauseIds) // Convert Set to Array
+    };
+
+    try {
+      const response = await fetch(`/api/admin/service-items/${service.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify(updatedServiceData)
+      });
+      
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || 'Failed to save service');
+      }
+      onSave(result); // Pass the updated service back to the parent
     } catch (err) {
-      console.error("Error fetching services:", err);
-      setError(`Error loading services: ${err.message}`);
-      setServicesData([]); // Clear data on error
+      setError(err.message);
     } finally {
-      setIsLoading(false);
+      setIsSaving(false);
     }
   };
 
-  fetchServices();
-}, []); // Empty dependency array means this runs once on mount
-
-  const renderContent = () => {
-    if (isLoading) {
-      return (
-        <div className="flex justify-center items-center h-64">
-          <BarLoader color="#4A90E2" />
-        </div>
-      );
-    }
-
-    if (error) {
-      return (
-        <div className="text-center text-red-500 p-4">
-          {error}
-        </div>
-      );
-    }
-
-    if (servicesData.length === 0) {
-      return (
-        <div className="text-center text-gray-500 p-4">
-          No services have been added yet.
-        </div>
-      );
-    }
-
-    // Render the list of service categories and their items
-    return (
-      <div className="space-y-6">
-        {servicesData.map((category) => (
-          <div key={category.id} className="bg-white p-4 shadow rounded-lg">
-            <h3 className="text-xl font-semibold text-gray-800 mb-3 border-b pb-2">
-              {category.name}
-              {/* We can add Edit/Delete buttons for the category here later */}
-            </h3>
-            <ul className="divide-y divide-gray-200">
-              {category.services && category.services.length > 0 ? (
-                category.services.map((item) => (
-                  <li key={item.id} className="py-3 flex justify-between items-center">
-                    <div>
-                      <p className="font-medium text-gray-700">{item.name}</p>
-                      <p className="text-sm text-gray-500">{item.description}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-gray-900">R {parseFloat(item.price).toFixed(2)}</p>
-                      {/* We can add Edit/Delete buttons for the item here later */}
-                    </div>
-                  </li>
-                ))
-              ) : (
-                <li className="py-3 text-sm text-gray-400">No items in this category.</li>
-              )}
-            </ul>
-            {/* We can add an "Add New Item" button here later */}
-          </div>
-        ))}
-      </div>
-    );
-  };
+  // State for the loading spinner inside the modal
+  const [isLoading, setIsLoading] = useState(true);
 
   return (
-    <div className="container mx-auto p-4 md:p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Services Management</h1>
-        {/* The "Add New Category" button will go here */}
-        {/* <button className="btn btn-primary">Add New Category</button> */}
+    <div className="modal-backdrop">
+      <div className="modal-content" style={{maxWidth: '600px'}}>
+        <div className="modal-header">
+          <h2>Edit Service: {service.name}</h2>
+          <button onClick={onClose} className="modal-close-btn">&times;</button>
+        </div>
+        
+        {isLoading ? (
+          <div style={{ padding: '40px', textAlign: 'center' }}>
+            <BarLoader color="#006ac6" width="100%" />
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <div className="modal-body">
+              {error && <div className="flash error">{error}</div>}
+              
+              <div className="form-group">
+                <label htmlFor="service_name">Service Name</label>
+                <input
+                  id="service_name" type="text" className="form-input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+              <div className="form-group" style={{marginTop: '15px'}}>
+                <label htmlFor="service_time">Est. Time (minutes)</label>
+                <input
+                  id="service_time" type="number" className="form-input"
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                />
+              </div>
+              
+              <div className="form-group" style={{marginTop: '20px'}}>
+                <label>Linked T&C Clauses</label>
+                <p style={{fontSize: '0.9rem', color: '#6b7280', marginTop: '-5px'}}>
+                  Select which T&C snippets apply when this service is quoted.
+                </p>
+                <div className="checkbox-list">
+                  {allClauses.length === 0 && <p>No T&C clauses found. Go to Business Settings to create them.</p>}
+                  
+                  {allClauses.map(clause => (
+                    <label key={clause.id} className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={selectedClauseIds.has(clause.id)}
+                        onChange={() => handleCheckboxChange(clause.id)}
+                      />
+                      {clause.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            <div className="modal-footer">
+              <button type="button" className="cta-outline" onClick={onClose}>Cancel</button>
+              <button type="submit" className="cta" disabled={isSaving} style={{marginLeft: '10px'}}>
+                {isSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
-      
-      {renderContent()}
-      
+    </div>
+  );
+};
+
+
+// --- Main Services Page Component ---
+function Services() {
+  const [categories, setCategories] = useState([]);
+  const [allClauses, setAllClauses] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [editingService, setEditingService] = useState(null); // null or service object
+  const [csrfToken, setCsrfToken] = useState("");
+
+  // Fetch all categories, items, and T&C clauses on mount
+  useEffect(() => {
+    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content");
+    setCsrfToken(token || "");
+  
+    const fetchData = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const [categoriesRes, clausesRes] = await Promise.all([
+          fetch('/api/admin/service-categories'),
+          fetch('/api/admin/service-clauses')
+        ]);
+        
+        if (!categoriesRes.ok) throw new Error('Failed to fetch services');
+        if (!clausesRes.ok) throw new Error('Failed to fetch T&C clauses');
+        
+        const categoriesData = await categoriesRes.json();
+        const clausesData = await clausesRes.json();
+        
+        setCategories(categoriesData);
+        setAllClauses(clausesData);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  // Handler to update the state after saving the modal
+  const handleSaveService = (updatedService) => {
+    // Find the category and item and update its name
+    const newCategories = categories.map(category => ({
+      ...category,
+      items: category.items.map(item => 
+        item.id === updatedService.id ? { ...item, name: updatedService.name, estimated_time_mins: updatedService.estimated_time_mins } : item
+      )
+    }));
+    setCategories(newCategories);
+    setEditingService(null); // Close the modal
+  };
+
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>
+        <BarLoader color="#006ac6" width="50%" />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="admin-header">
+        <h1>Services</h1>
+        <p>Manage your service items and link them to T&C clauses.</p>
+        {/* We can add a "New Service" button here later */}
+      </div>
+
+      {error && <div className="flash error">{error}</div>}
+
+      {categories.map(category => (
+        <div key={category.id} className="admin-section">
+          <h2>{category.name}</h2>
+          <p>{category.description}</p>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Service Name</th>
+                <th>Est. Time (Mins)</th>
+                <th style={{width: '100px'}}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {category.items.length === 0 && (
+                <tr><td colSpan="3">No services found in this category.</td></tr>
+              )}
+              {category.items.map(item => (
+                <tr key={item.id}>
+                  <td data-label="Name"><strong>{item.name}</strong></td>
+                  <td data-label="Est. Time">{item.estimated_time_mins}</td>
+                  <td data-label="Actions" className="actions-cell">
+                    <button 
+                      className="cta-outline-small"
+                      onClick={() => setEditingService(item)}
+                    >
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+
+      {/* --- Render the Edit Modal --- */}
+      {editingService && (
+        <EditServiceModal
+          service={editingService}
+          allClauses={allClauses}
+          onSave={handleSaveService}
+          onClose={() => setEditingService(null)}
+          csrfToken={csrfToken}
+        />
+      )}
     </div>
   );
 }

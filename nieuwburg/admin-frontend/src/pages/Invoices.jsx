@@ -1,121 +1,200 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import { BarLoader } from 'react-spinners';
 
 function Invoices() {
   const [invoices, setInvoices] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [csrfToken, setCsrfToken] = useState("");
+  
+  // Handle flash messages
+  const location = useLocation();
+  const [flashMsg, setFlashMsg] = useState(location.state?.flashMessage || null);
 
   useEffect(() => {
+    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content");
+    setCsrfToken(token || "");
+
     const fetchInvoices = async () => {
-      setIsLoading(true);
-      setError(null);
       try {
-        const response = await fetch('/api/admin/invoices'); // Fetch from the new endpoint
-        if (!response.ok) {
-          if (response.status === 403) {
-            throw new Error('Permission denied fetching invoices.');
-          }
-          throw new Error(`HTTP error fetching invoices! status: ${response.status}`);
-        }
+        const response = await fetch('/api/admin/invoices');
+        if (!response.ok) throw new Error('Failed to fetch invoices');
         const data = await response.json();
         setInvoices(data);
       } catch (err) {
-        console.error('Error fetching invoices:', err);
-        setError(`Error loading invoices: ${err.message}`);
-        setInvoices([]); // Clear invoices on error
+        setError(err.message);
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchInvoices();
-  }, []); // Run once on mount
+  }, []);
 
-  // Helper function to format currency
-  const formatCurrency = (amount) => {
-    if (amount === null || amount === undefined) return 'N/A';
-    const num = parseFloat(amount);
-    return isNaN(num) ? 'N/A' : `R ${num.toFixed(2)}`;
-  };
-
-  // Helper function to get status color (adjust based on your Invoice statuses)
-  const getStatusClass = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'paid': return 'status-completed'; // Green
-      case 'unpaid': return 'status-scheduled'; // Blue/Default
-      case 'overdue': return 'status-cancelled'; // Grey/Red
-      default: return 'status-unknown'; // Default grey
+  // --- Send Email Handler ---
+  const handleSend = async (invoiceId, email) => {
+    if (!window.confirm(`Email this invoice to ${email}?`)) return;
+    
+    try {
+      const response = await fetch(`/api/admin/invoices/${invoiceId}/send`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken }
+      });
+      const result = await response.json();
+      if (response.ok) {
+        alert(result.message);
+      } else {
+        alert(`Error: ${result.message}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Network error sending invoice.");
     }
   };
 
+  // --- Copy Link Handler ---
+  const handleCopyLink = (token) => {
+    if (!token) {
+      alert("No payment link available for this invoice.");
+      return;
+    }
+    const url = `${window.location.origin}/invoice/pay/${token}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setFlashMsg({ type: 'success', text: 'Payment link copied to clipboard!' });
+      // Clear message after 3 seconds
+      setTimeout(() => setFlashMsg(null), 3000);
+    }, () => {
+      alert("Failed to copy link.");
+    });
+  };
+
+  const handleDelete = async (invoiceId) => {
+    if (!window.confirm("Are you sure? This will permanently delete this invoice.")) return;
+    
+    try {
+      const response = await fetch(`/admin/invoices/delete/${invoiceId}`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken }
+      });
+      const result = await response.json();
+      if (result.status === 'ok') {
+        setInvoices(invoices.filter(inv => inv.id !== invoiceId));
+        setFlashMsg({ type: 'success', text: result.message });
+      } else {
+        alert(result.message || "Failed to delete invoice.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("An error occurred.");
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>
+        <BarLoader color="#006ac6" width="50%" />
+      </div>
+    );
+  }
 
   return (
     <div>
       <div className="admin-header">
         <h1>Invoices</h1>
-        <p>View and manage client invoices.</p>
-        {/* Optional: Button to create a new invoice */}
-        {/* <Link to="/invoices/new" className="cta">Create New Invoice</Link> */}
+        <div className="header-actions">
+           <button className="cta" disabled title="Create via Quotes for now">New Invoice</button>
+        </div>
       </div>
 
-      {error && (
-        <div className="flash error" style={{ marginBottom: '20px' }}>
-          {error}
+      {flashMsg && (
+        <div className={`flash ${flashMsg.type}`}>
+            {flashMsg.text}
         </div>
       )}
 
-      <div className="admin-section">
-        <h2>All Invoices</h2>
-        {isLoading ? (
-          <p>Loading invoices...</p>
-        ) : invoices.length > 0 ? (
+      {error && <p className="error-message">{error}</p>}
+
+      {!isLoading && !error && invoices.length === 0 ? (
+        <div className="empty-state">
+          <p>No invoices generated yet.</p>
+          <p style={{fontSize: '0.9rem', color: '#666'}}>Go to "Quotes" and convert an accepted quote to an invoice.</p>
+          <Link to="/quotes" className="cta-outline" style={{marginTop: '10px', display: 'inline-block'}}>Go to Quotes</Link>
+        </div>
+      ) : (
+        <div className="table-container">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Invoice #</th>
                 <th>Client</th>
-                <th>Issued</th>
-                <th>Due</th>
-                <th>Amount</th>
+                <th>Date Issued</th>
+                <th>Due Date</th>
+                <th>Total</th>
                 <th>Status</th>
-                <th>Actions</th>
+                <th style={{textAlign: 'right'}}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {invoices.map((invoice) => (
-                <tr key={invoice.id}>
-                  <td>{invoice.invoice_number}</td>
-                  <td>
-                    <Link to={`/clients/${invoice.client_id}`}>
-                      {invoice.client_name}
-                    </Link>
+              {invoices.map((inv) => (
+                <tr key={inv.id}>
+                  <td style={{fontWeight: 600, color: '#002244'}}>
+                    {inv.invoice_number}
                   </td>
-                  <td>{invoice.issue_date}</td>
-                  <td>{invoice.due_date}</td>
-                  <td>{formatCurrency(invoice.total_amount)}</td>
                   <td>
-                    <span className={`booking-status ${getStatusClass(invoice.status)}`}>
-                      {invoice.status}
+                    {inv.client_name}
+                    {inv.client_id && (
+                        <Link to={`/clients/${inv.client_id}`} className="table-link-icon" title="View Client">
+                            <i className="fa-regular fa-user"></i>
+                        </Link>
+                    )}
+                  </td>
+                  <td>{inv.issue_date}</td>
+                  <td>{inv.due_date}</td>
+                  <td style={{fontWeight: 600}}>
+                    R {inv.total_amount ? inv.total_amount.toFixed(2) : '0.00'}
+                  </td>
+                  <td>
+                    <span className="status-badge" data-status={inv.status}>
+                      {inv.status}
                     </span>
                   </td>
-                  <td className="action-buttons">
-                    {/* Placeholder Actions */}
-                    <Link to={`/invoices/view/${invoice.id}`} className="cta-outline-small">View</Link>
-                    {/* <Link to={`/invoices/edit/${invoice.id}`} className="cta-outline-small">Edit</Link> */}
-                    {/* Add action like "Mark Paid" if applicable */}
-                    {invoice.status !== 'Paid' && (
-                      <button className="cta-outline-small" style={{marginLeft: '5px'}}>Mark Paid</button>
-                    )}
+                  <td style={{textAlign: 'right'}}>
+                    {/* Copy Link Button */}
+                    <button 
+                        className="icon-btn" 
+                        onClick={() => handleCopyLink(inv.payment_token)}
+                        title="Copy Payment Link"
+                        style={{marginRight: '8px', color: '#006ac6'}}
+                    >
+                        <i className="fa-solid fa-link"></i>
+                    </button>
+
+                    {/* Send Email Button */}
+                    <button 
+                        className="icon-btn" 
+                        onClick={() => handleSend(inv.id, inv.client_name)}
+                        title="Email Invoice"
+                        style={{marginRight: '8px', color: '#10b981'}}
+                    >
+                        <i className="fa-solid fa-paper-plane"></i>
+                    </button>
+
+                    {/* Delete Button */}
+                    <button 
+                        className="icon-btn delete-btn" 
+                        onClick={() => handleDelete(inv.id)}
+                        title="Delete Invoice"
+                    >
+                        <i className="fa-solid fa-trash"></i>
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        ) : (
-          <p>No invoices found.</p>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

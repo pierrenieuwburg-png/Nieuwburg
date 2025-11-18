@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, current_app, flash, render_template, redirect, url_for, flash, Response
 from flask_login import current_user, login_required
-from sqlalchemy import or_
+from sqlalchemy import or_, and_
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.attributes import flag_modified
 import secrets
@@ -10,23 +10,23 @@ import pytz
 import os
 import uuid
 import traceback
+from .admin import admin_required
 from ..forms import GuestQuoteForm
 from ..models import QuoteLineItem, User
-from .utils import get_next_quote_number, log_activity, send_async_email
+from .utils import get_next_quote_number, log_activity, send_async_email, render_template_to_pdf, send_email_with_attachment, get_next_invoice_number
 from markupsafe import escape, Markup
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash
 from datetime import date, datetime, time, timedelta
 from .. import db
 from ..models import (Post, ServiceCategory, ServiceItem, Job, User, Profile, 
                       QuoteRequest, Quote, StaffApplication, QuoteLineItem, 
-                      ActivityLog, Invoice, BusinessSettings, ServiceClause)
+                      ActivityLog, Invoice, BusinessSettings, ServiceClause, Tenant, InvoiceLineItem)
 
 from ..forms import AddClientForm, AddStaffForm, EditStaffForm, EditClientForm
 from .auth import generate_confirmation_token
 from .. import mail
 from flask_mail import Message
-from .utils import render_template_to_pdf, send_email_with_attachment
-
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -41,24 +41,24 @@ def nl2br(value):
 # --- Add Client API Route ---
 @bp.route('/admin/clients', methods=['POST'])
 @login_required
-# @admin_required # Optional decorator
 def api_add_client():
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
 
     data = request.json
-    form = AddClientForm(data=data) # Use WTForms for validation
+    form = AddClientForm(data=data) 
 
     if form.validate():
-        # Check for existing email (form validator might do this, but double-check)
+        # Check if email exists globally (Constraint: User emails must be unique across the platform)
         if User.query.filter_by(email=form.email.data).first():
-            return jsonify({'message': 'A user with this email already exists.'}), 400
+            return jsonify({'message': 'A user with this email already exists in the system.'}), 400
 
         try:
             new_client = User(
                 email=form.email.data,
                 role='client',
-                is_confirmed=True
+                is_confirmed=True,
+                tenant_id=current_user.tenant_id  # <--- TENANT AWARE
             )
             temp_password = secrets.token_urlsafe(12)
             new_client.set_password(temp_password)
@@ -67,78 +67,74 @@ def api_add_client():
                 user=new_client,
                 full_name=form.full_name.data,
                 phone_number=form.phone_number.data,
-                address=form.address.data
+                address=form.address.data,
+                tenant_id=current_user.tenant_id # <--- TENANT AWARE
             )
 
             db.session.add(new_client)
-            # Ensure profile is added if not automatically cascaded
-            # Check your User model's relationship for cascade settings
-            # If unsure, adding explicitly is safer:
             db.session.add(new_profile)
             db.session.commit()
 
             log_activity('Client Created (API)', f"Admin '{current_user.email}' created client: {form.email.data}")
 
-            # Return success message and potentially the new client's basic info
             return jsonify({
                 'message': 'Client added successfully!',
-                'client': { # Send back basic data to potentially update UI further if needed
+                'client': { 
                     'id': new_client.id,
                     'full_name': new_profile.full_name,
                     'email': new_client.email,
-                    'phone_number': new_profile.phone_number, # Send back all relevant data
+                    'phone_number': new_profile.phone_number, 
                     'address': new_profile.address,
-                    #'view_url': url_for('admin.view_client', user_id=new_client.id) # Include view URL
                 }
-             }), 201 # 201 Created status
+             }), 201 
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error adding client via API: {e}") # Log the error server-side
+            print(f"Error adding client via API: {e}") 
             return jsonify({'message': 'Database error occurred.'}), 500
 
     else:
-        # Collect validation errors
         errors = [f"{field}: {', '.join(error_list)}" for field, error_list in form.errors.items()]
         return jsonify({'message': f"Validation failed: {'; '.join(errors)}"}), 400
     
-@bp.route('/admin/clients/<int:user_id>', methods=['PUT']) # Using PUT as it's an update
+@bp.route('/admin/clients/<int:user_id>', methods=['PUT']) 
 @login_required
 def update_client_details(user_id):
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
 
+    # TENANT AWARE: Ensure we only find clients belonging to this tenant
     client = User.query.options(joinedload(User.profile)).filter(
-        User.id == user_id, User.role == 'client'
+        User.id == user_id, 
+        User.role == 'client',
+        User.tenant_id == current_user.tenant_id # <--- SECURITY CHECK
     ).first()
 
     if not client or not client.profile:
-        return jsonify({"message": "Client or profile not found"}), 404
+        return jsonify({"message": "Client not found or permission denied"}), 404
 
     data = request.json
     if not data:
         return jsonify({"message": "No input data provided"}), 400
 
-    # Use EditClientForm fields as a guide
     profile = client.profile
     profile.full_name = data.get('full_name', profile.full_name)
     profile.phone_number = data.get('phone_number', profile.phone_number)
     profile.address = data.get('address', profile.address)
     profile.service_frequency = data.get('service_frequency', profile.service_frequency)
-    # Handle service_fee carefully - it might come as a string or number
+    
     service_fee_input = data.get('service_fee', profile.service_fee)
     try:
          profile.service_fee = float(service_fee_input) if service_fee_input not in [None, ''] else None
     except (ValueError, TypeError):
-         profile.service_fee = profile.service_fee # Keep old value on conversion error
+         profile.service_fee = profile.service_fee 
 
-    profile.notes = data.get('notes', profile.notes) # Assuming notes field
+    profile.notes = data.get('notes', profile.notes)
 
     try:
         db.session.commit()
         log_activity('Client Updated (API)', f"Admin '{current_user.email}' updated profile for {client.email}")
 
-         # Fetch updated data to return
         updated_data = get_client_details(user_id).get_json()
 
         return jsonify({
@@ -159,14 +155,27 @@ def get_dashboard_stats():
 
     try:
         today = date.today()
-        # These queries match the logic previously in admin.py's dashboard route
-        new_quotes_count = QuoteRequest.query.filter_by(status='New').count() # Counts new specialized requests
+        # TENANT AWARE: Filter all counts by tenant_id
+        new_quotes_count = QuoteRequest.query.filter_by(
+            status='New', 
+            tenant_id=current_user.tenant_id
+        ).count()
+
         upcoming_cleans_count = Job.query.filter(
             Job.scheduled_date >= today,
-            Job.status.in_(['Scheduled', 'In-Progress']) # Counts jobs scheduled for today or later that are not completed/cancelled
+            Job.status.in_(['Scheduled', 'In-Progress']),
+            Job.tenant_id == current_user.tenant_id # <--- TENANT AWARE
         ).count()
-        active_clients_count = User.query.filter_by(role='client').count() # Counts all users with role 'client'
-        staff_members_count = User.query.filter_by(role='staff').count() # Counts all users with role 'staff'
+        
+        active_clients_count = User.query.filter_by(
+            role='client', 
+            tenant_id=current_user.tenant_id # <--- TENANT AWARE
+        ).count()
+        
+        staff_members_count = User.query.filter_by(
+            role='staff', 
+            tenant_id=current_user.tenant_id # <--- TENANT AWARE
+        ).count()
 
         stats_data = {
             "new_quotes_count": new_quotes_count,
@@ -176,15 +185,12 @@ def get_dashboard_stats():
         }
         return jsonify(stats_data)
     except Exception as e:
-        print(f"Error fetching dashboard stats: {e}") # Log error server-side
+        print(f"Error fetching dashboard stats: {e}")
         return jsonify({"message": "Error fetching dashboard statistics."}), 500
     
 @bp.route('/admin/jobs/by_date/<string:date_str>', methods=['GET'])
 @login_required
 def get_jobs_by_date(date_str):
-    """
-    Fetches all jobs scheduled for a specific date.
-    """
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
 
@@ -194,13 +200,13 @@ def get_jobs_by_date(date_str):
         return jsonify({"message": "Invalid date format. Use YYYY-MM-DD."}), 400
 
     try:
-        # Query jobs, joining client/staff profiles and the quote request
         jobs_on_date = Job.query.options(
             joinedload(Job.client).joinedload(User.profile),
             joinedload(Job.assigned_staff).joinedload(User.profile),
-            joinedload(Job.quote_request) # Load the related quote request
+            joinedload(Job.quote_request)
         ).filter(
-            Job.scheduled_date == target_date
+            Job.scheduled_date == target_date,
+            Job.tenant_id == current_user.tenant_id # <--- TENANT AWARE
         ).order_by(Job.start_time.asc()).all()
 
         jobs_data = []
@@ -211,19 +217,16 @@ def get_jobs_by_date(date_str):
             elif job.client:
                  client_name = job.client.email
 
-            # --- Get service name from the quote_request ---
             service_name = job.quote_request.primary_service if job.quote_request else "N/A"
-            # ---
 
             staff_names = ", ".join(
-                # Safely access profile name
                 [staff.profile.full_name for staff in job.assigned_staff if staff.profile and staff.profile.full_name]
             ) or 'N/A'
 
             jobs_data.append({
                 "id": job.id,
                 "client_name": client_name,
-                "service_name": service_name, # Use name via quote_request
+                "service_name": service_name,
                 "start_time": job.start_time.strftime('%H:%M') if job.start_time else '--:--',
                 "assigned_staff": staff_names,
                 "status": job.status
@@ -243,11 +246,15 @@ def get_quote_detail(quote_id):
         return jsonify({"message": "Permission denied"}), 403
 
     try:
-        quote = db.session.get(QuoteRequest, quote_id)
+        # TENANT AWARE
+        quote = QuoteRequest.query.filter_by(
+            id=quote_id, 
+            tenant_id=current_user.tenant_id
+        ).first()
+        
         if not quote:
             return jsonify({"message": "Quote request not found"}), 404
 
-        # Convert to SAST for display
         sast_timezone = pytz.timezone('Africa/Johannesburg')
         formatted_date = 'N/A'
         if quote.request_date:
@@ -260,7 +267,7 @@ def get_quote_detail(quote_id):
             "email": quote.email or 'N/A',
             "phone": quote.phone or 'N/A',
             "address": quote.address or 'Not provided',
-            "user_id": quote.user_id # For linking to client detail page
+            "user_id": quote.user_id 
         }
 
         request_data = {
@@ -287,13 +294,16 @@ def get_quote_detail(quote_id):
 def get_formal_quote_detail(quote_id):
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
-
     try:
-        quote = db.session.get(Quote, quote_id)
+        # TENANT AWARE
+        quote = Quote.query.filter_by(
+            id=quote_id,
+            tenant_id=current_user.tenant_id
+        ).first()
+
         if not quote:
             return jsonify({"message": "Formal quote not found"}), 404
             
-        # Get Client Info
         client_data = {
             "name": "N/A", "email": "N/A", "phone": "N/A", "address": "N/A",
             "user_id": quote.user_id
@@ -313,20 +323,26 @@ def get_formal_quote_detail(quote_id):
             client_data["phone"] = quote.guest_phone
             client_data["address"] = quote.guest_address
 
-        # Get Quote Info
         quote_data = {
             "id": quote.id, "quote_number": quote.quote_number,
             "quote_date": quote.quote_date.strftime('%d %b %Y') if quote.quote_date else 'N/A',
             "expiry_date": quote.expiry_date.strftime('%d %b %Y') if quote.expiry_date else 'N/A',
             "status": quote.status, "subtotal": quote.subtotal,
-            "discount": quote.discount_value, "total": quote.total
+            "discount": quote.discount_value, "total": quote.total,
+            "terms_and_conditions": quote.terms_and_conditions,
+            "business_address": quote.business_address,
+            "registration_number": quote.registration_number
         }
         
-        # Get Line Items
+        # Line items are safe because they belong to the Quote, which we already verified
         line_items = QuoteLineItem.query.filter_by(quote_id=quote_id).all()
         items_data = [{
-            "id": item.id, "description": item.description, "quantity": item.quantity,
-            "unit_price": item.unit_price, "amount": item.amount
+            "id": item.id, 
+            "description": item.description, 
+            "quantity": item.quantity,
+            "unit_price": item.unit_price, 
+            "amount": item.amount,
+            "service_item_id": item.service_item_id 
         } for item in line_items]
 
         return jsonify({
@@ -346,12 +362,15 @@ def api_update_quote(quote_id):
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
 
-    # Find the existing quote
-    quote = db.session.get(Quote, quote_id)
+    # TENANT AWARE
+    quote = Quote.query.filter_by(
+        id=quote_id,
+        tenant_id=current_user.tenant_id
+    ).first()
+
     if not quote:
         return jsonify({"message": "Quote not found"}), 404
 
-    # --- Check for edit permissions ---
     if quote.status != 'Draft':
         return jsonify({
             "message": f"Quote is in '{quote.status}' status and can no longer be edited."
@@ -366,7 +385,6 @@ def api_update_quote(quote_id):
          return jsonify({"message": "At least one line item is required."}), 400
 
     try:
-        # --- 1. Update the Quote object ---
         quote.user_id = data.get('client_id')
         quote.guest_name = data.get('guest_name')
         quote.guest_email = data.get('email')
@@ -377,21 +395,19 @@ def api_update_quote(quote_id):
         quote.discount_value = data.get('discount')
         quote.total = data.get('total')
         
-        # --- 2. Delete old line items ---
         QuoteLineItem.query.filter_by(quote_id=quote_id).delete()
 
-        # --- 3. Add new line items ---
         for item in line_items:
             line_item = QuoteLineItem(
                 quote_id=quote.id,
                 description=item.get('description'),
                 quantity=float(item.get('quantity', 0)),
                 unit_price=float(item.get('unit_price', 0)),
-                amount=(float(item.get('quantity', 0)) * float(item.get('unit_price', 0)))
+                amount=(float(item.get('quantity', 0)) * float(item.get('unit_price', 0))),
+                service_item_id=item.get('service_item_id') 
             )
             db.session.add(line_item)
 
-        # --- 4. Log and Commit ---
         log_activity(
             'Quote Updated',
             f"Admin '{current_user.email}' updated quote {quote.quote_number}."
@@ -409,44 +425,23 @@ def api_update_quote(quote_id):
         traceback.print_exc()
         return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
     
-@bp.route('/admin/business-settings', methods=['GET'])
-@login_required
-def get_business_settings():
-    """
-    Provides the 'locked' business settings for display on quotes/invoices.
-    """
-    if not current_user.is_authenticated or current_user.role != 'admin':
-        return jsonify({"message": "Permission denied"}), 403
-
-    try:
-        settings = {
-            "business_name": "Nieuwburg Blitz",
-            "business_address": "24 A 5, Parow Park, Balfour Street, Cape Town, 7500",
-            "registration_number": "2025/123456/07",
-            "terms_and_conditions": (
-                "1. All payments are due within 30 days of the invoice date.\n"
-                "2. A 10% late fee will be applied to all overdue accounts.\n"
-                "3. Cancellations must be made at least 48 hours prior to the scheduled service time.\n"
-                "4. Nieuwburg Blitz is not responsible for pre-existing damage.\n"
-                "5. All services are considered accepted upon completion unless a complaint is filed within 24 hours."
-            )
-        }
-        return jsonify(settings)
-
-    except Exception as e:
-        print(f"Error fetching business settings: {e}")
-        return jsonify({"message": "Could not load business settings."}), 500
-    
 @bp.route('/admin/business-settings', methods=['GET', 'PUT'])
 @login_required
 def api_business_settings():
     """
-    Handles fetching and updating the global business settings.
+    Handles fetching and updating the TENANT-SPECIFIC business settings.
     """
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
 
-    settings = BusinessSettings.get_settings() # Use our helper
+    # TENANT AWARE: Fetch settings for THIS tenant
+    settings = BusinessSettings.query.filter_by(tenant_id=current_user.tenant_id).first()
+    
+    if not settings:
+        # Initialize if not found (shouldn't happen after setup wizard, but good safety)
+        settings = BusinessSettings(tenant_id=current_user.tenant_id)
+        db.session.add(settings)
+        db.session.commit()
 
     if request.method == 'PUT':
         data = request.get_json()
@@ -498,11 +493,13 @@ def api_download_quote(item_id):
         pdf_data = None
 
         if item_type == 'request':
-            # --- Download PDF for a QuoteRequest (Lead) ---
-            # Eagerly load the user and profile for the template
+            # TENANT AWARE
             quote_req = db.session.query(QuoteRequest).options(
                 joinedload(QuoteRequest.user).joinedload(User.profile)
-            ).filter_by(id=item_id).first()
+            ).filter_by(
+                id=item_id,
+                tenant_id=current_user.tenant_id
+            ).first()
             
             if not quote_req:
                 return "Quote Request not found", 404
@@ -515,15 +512,14 @@ def api_download_quote(item_id):
             filename = f"Quote_Request_{quote_req.id}.pdf"
 
         elif item_type == 'quote':
-            # --- Download PDF for a Formal Quote ---
-            
-            # --- THIS IS THE FIX ---
-            # Eagerly load line_items AND the user/profile
+            # TENANT AWARE
             quote = db.session.query(Quote).options(
                 joinedload(Quote.line_items),
                 joinedload(Quote.user).joinedload(User.profile)
-            ).filter_by(id=item_id).first()
-            # --- END OF FIX ---
+            ).filter_by(
+                id=item_id,
+                tenant_id=current_user.tenant_id
+            ).first()
             
             if not quote:
                 return "Formal Quote not found", 404
@@ -538,7 +534,6 @@ def api_download_quote(item_id):
         else:
             return "Invalid item type provided.", 400
 
-        # Return as an attachment
         return Response(
             pdf_data,
             mimetype='application/pdf',
@@ -556,20 +551,22 @@ def api_send_quote(quote_id):
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
 
-    # Check for CSRF token from the header (sent by React)
     csrf_token = request.headers.get('X-CSRFToken')
     if not csrf_token:
         return jsonify({"message": "CSRF token missing"}), 400
 
-    quote = db.session.get(QuoteRequest, quote_id)
+    # TENANT AWARE
+    quote = QuoteRequest.query.filter_by(
+        id=quote_id,
+        tenant_id=current_user.tenant_id
+    ).first()
+
     if not quote:
         return jsonify({"message": "Quote not found"}), 404
 
-    # Prevent re-sending quotes that are already finalized
     if quote.status in ['Accepted', 'Rejected']:
         return jsonify({"message": f"Quote is already {quote.status} and cannot be sent."}), 400
 
-    # Ensure we have an email to send to
     recipient_email = quote.email
     if not recipient_email and quote.user and quote.user.email:
         recipient_email = quote.user.email
@@ -578,21 +575,20 @@ def api_send_quote(quote_id):
         return jsonify({"message": "Cannot send quote: No email address found for this client."}), 400
 
     try:
-        # 1. Generate PDF in memory
         pdf_data = render_template_to_pdf(
             'public/quote_pdf_template.html', 
             quote=quote
         )
-
-        # 2. Generate email content
-        token = quote.get_quote_token()
+        
+        # Note: get_quote_token implies public access. 
+        # Ensure the public access route doesn't require login but verifies token validity.
+        token = quote.get_quote_token() 
         email_html = render_template(
             'email/quote_ready.html', 
             quote=quote, 
             token=token
         )
 
-        # 3. Send the email with PDF attachment
         pdf_filename = f"Quote_{quote.quote_number}.pdf"
         send_email_with_attachment(
             subject=f"Your Quote from Nieuwburg Blitz ({quote.quote_number})",
@@ -603,7 +599,6 @@ def api_send_quote(quote_id):
             attachment_mimetype='application/pdf'
         )
 
-        # 4. Update status and log
         quote.status = 'Sent'
         log_activity(
             'Quote Sent', 
@@ -632,13 +627,16 @@ def api_delete_quote(item_id):
     if not csrf_token:
         return jsonify({"message": "CSRF token missing"}), 400
 
-    # Get the 'type' from the query string (e.g., ?type=request or ?type=quote)
     item_type = request.args.get('type')
     
     try:
         if item_type == 'request':
-            # --- Delete a QuoteRequest (a lead) ---
-            quote_req = db.session.get(QuoteRequest, item_id)
+            # TENANT AWARE
+            quote_req = QuoteRequest.query.filter_by(
+                id=item_id,
+                tenant_id=current_user.tenant_id
+            ).first()
+
             if not quote_req:
                 return jsonify({"message": "Quote Request not found"}), 404
             
@@ -650,14 +648,17 @@ def api_delete_quote(item_id):
             )
             
         elif item_type == 'quote':
-            # --- Delete a formal Quote (manually created) ---
-            quote = db.session.get(Quote, item_id)
+            # TENANT AWARE
+            quote = Quote.query.filter_by(
+                id=item_id,
+                tenant_id=current_user.tenant_id
+            ).first()
+
             if not quote:
                 return jsonify({"message": "Formal Quote not found"}), 404
             
             item_desc = quote.quote_number or f"Quote #{quote.id}"
             
-            # Delete associated line items first
             QuoteLineItem.query.filter_by(quote_id=item_id).delete()
             db.session.delete(quote)
             
@@ -685,64 +686,54 @@ def api_create_quote():
         return jsonify({"message": "Permission denied"}), 403
 
     data = request.get_json()
-    if not data:
-        return jsonify({"message": "No data provided."}), 400
-
-    client_id = data.get('client_id')
-    guest_name = data.get('guest_name')
-    line_items = data.get('line_items', [])
-    
-    client = None
-    
-    # --- 1. Validate Client ---
-    if client_id:
-        client = db.session.get(User, client_id)
-        if not client or client.role != 'client':
-            return jsonify({"message": "Invalid client selected."}), 404
-    elif not guest_name:
-         return jsonify({"message": "Client name is required."}), 400
-    
-    if not line_items:
-         return jsonify({"message": "At least one line item is required."}), 400
+    if not data: return jsonify({"message": "No data provided."}), 400
+    if not data.get('line_items'): return jsonify({"message": "At least one line item is required."}), 400
 
     try:
-        # --- 2. Create the correct Quote object ---
+        # TENANT AWARE: Get this tenant's settings
+        settings = BusinessSettings.query.filter_by(tenant_id=current_user.tenant_id).first()
+        if not settings:
+             # Fallback if settings missing
+             settings = BusinessSettings(tenant_id=current_user.tenant_id) 
+
         new_quote = Quote(
-            quote_number=get_next_quote_number(),
-            user_id=client_id,
-            guest_name=guest_name if not client else None,
-            guest_email=client.email if client and not client_id else (data.get('email') if not client_id else None),
-            guest_phone=client.profile.phone_number if client and client.profile and not client_id else (data.get('phone_number') if not client_id else None),
-            guest_address=client.profile.address if client and client.profile and not client_id else (data.get('address') if not client_id else None),
+            quote_number=get_next_quote_number(), # Note: This function also needs to be tenant-aware eventually
+            user_id=data.get('client_id'),
+            guest_name=data.get('guest_name'),
+            guest_email=data.get('email'),
+            guest_phone=data.get('phone_number'),
+            guest_address=data.get('address'),
             
             subtotal=data.get('subtotal'),
             discount_value=data.get('discount'),
             total=data.get('total'),
             
-            status='Draft', # Start as Draft
+            status='Draft',
             quote_date=date.today(),
-            expiry_date=date.today() + timedelta(days=30)
+            expiry_date=date.today() + timedelta(days=30),
+            
+            business_address=settings.business_address,
+            registration_number=settings.registration_number,
+            terms_and_conditions=settings.default_terms,
+            
+            tenant_id=current_user.tenant_id # <--- TENANT AWARE
         )
         
         db.session.add(new_quote)
-        db.session.flush()  # Get the new_quote.id
+        db.session.flush() 
 
-        # --- 3. Create Line Items with the correct 'quote_id' ---
-        for item in line_items:
+        for item in data.get('line_items', []):
             line_item = QuoteLineItem(
-                quote_id=new_quote.id, # <--- THIS IS THE FIX
+                quote_id=new_quote.id, 
                 description=item.get('description'),
                 quantity=float(item.get('quantity', 0)),
                 unit_price=float(item.get('unit_price', 0)),
-                amount=(float(item.get('quantity', 0)) * float(item.get('unit_price', 0)))
+                amount=(float(item.get('quantity', 0)) * float(item.get('unit_price', 0))),
+                service_item_id=item.get('service_item_id')
             )
             db.session.add(line_item)
 
-        # --- 4. Log and Commit ---
-        log_activity(
-            'Quote Created',
-            f"Admin '{current_user.email}' created quote {new_quote.quote_number}."
-        )
+        log_activity('Quote Created', f"Admin '{current_user.email}' created quote {new_quote.quote_number}.")
         db.session.commit()
         
         return jsonify({
@@ -756,29 +747,289 @@ def api_create_quote():
         traceback.print_exc()
         return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
     
+@bp.route('/admin/quotes/<int:quote_id>/convert-to-invoice', methods=['POST'])
+@login_required
+def api_convert_quote_to_invoice(quote_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    # 1. Fetch the Quote (Tenant Aware)
+    quote = Quote.query.filter_by(
+        id=quote_id,
+        tenant_id=current_user.tenant_id
+    ).first()
+
+    if not quote:
+        return jsonify({"message": "Quote not found."}), 404
+
+    try:
+        # --- FIX: Handle Guest Quotes (Missing user_id) ---
+        final_user_id = quote.user_id
+        
+        if not final_user_id:
+            # This is a guest quote. We must create a Client User for them.
+            # Check if user exists by email first
+            existing_user = User.query.filter_by(
+                email=quote.guest_email, 
+                tenant_id=current_user.tenant_id
+            ).first()
+            
+            if existing_user:
+                final_user_id = existing_user.id
+            else:
+                # Create new client user
+                new_client = User(
+                    email=quote.guest_email,
+                    role='client',
+                    is_confirmed=False, # They haven't logged in yet
+                    tenant_id=current_user.tenant_id
+                )
+                # Set a random temp password
+                new_client.set_password(secrets.token_urlsafe(12))
+                
+                new_profile = Profile(
+                    user=new_client,
+                    full_name=quote.guest_name or "Guest Client",
+                    phone_number=quote.guest_phone,
+                    address=quote.guest_address,
+                    tenant_id=current_user.tenant_id
+                )
+                
+                db.session.add(new_client)
+                db.session.add(new_profile)
+                db.session.flush() # Get the ID
+                
+                final_user_id = new_client.id
+                
+                # Link the original quote to this new user for future reference
+                quote.user_id = final_user_id
+
+        # 2. Create the Invoice Header
+        new_invoice = Invoice(
+            invoice_number=get_next_invoice_number(), 
+            user_id=final_user_id, # Use the guaranteed ID
+            tenant_id=current_user.tenant_id,
+            invoice_date=date.today(),
+            due_date=date.today() + timedelta(days=7),
+            status='Unpaid',
+            subtotal=quote.subtotal,
+            discount_value=quote.discount_value,
+            total=quote.total,
+            payment_token=secrets.token_urlsafe(32)
+        )
+        
+        db.session.add(new_invoice)
+        db.session.flush() 
+
+        # 3. Clone Line Items
+        for q_item in quote.line_items:
+            inv_item = InvoiceLineItem(
+                invoice_id=new_invoice.id,
+                description=q_item.description,
+                quantity=q_item.quantity,
+                unit_price=q_item.unit_price,
+                amount=q_item.amount
+            )
+            db.session.add(inv_item)
+
+        # 4. Update Quote Status
+        quote.status = 'Invoiced'
+
+        # 5. Log Activity
+        log_activity(
+            'Invoice Generated', 
+            f"Admin converted Quote {quote.quote_number} to Invoice {new_invoice.invoice_number}."
+        )
+
+        db.session.commit()
+
+        return jsonify({
+            "message": f"Successfully created Invoice {new_invoice.invoice_number}",
+            "invoice_id": new_invoice.id
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error converting quote to invoice: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal error occurred: {str(e)}"}), 500
+    
+@bp.route('/admin/service-categories', methods=['GET'])
+@login_required
+def get_service_categories():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+    
+    try:
+        # TENANT AWARE
+        categories = ServiceCategory.query.options(
+            joinedload(ServiceCategory.items)
+        ).filter_by(
+            tenant_id=current_user.tenant_id # <--- SECURITY
+        ).order_by(ServiceCategory.name).all()
+        
+        categories_data = []
+        for category in categories:
+            items_data = [{
+                'id': item.id,
+                'name': item.name,
+                'estimated_time_mins': item.estimated_time_mins
+            } for item in category.items]
+            
+            categories_data.append({
+                'id': category.id,
+                'name': category.name,
+                'description': category.description,
+                'items': items_data
+            })
+            
+        return jsonify(categories_data)
+        
+    except Exception as e:
+        print(f"Error fetching service categories: {e}")
+        traceback.print_exc()
+        return jsonify({"message": "Error fetching service data."}), 500
+
+@bp.route('/admin/service-items/<int:item_id>', methods=['GET'])
+@login_required
+def get_service_item(item_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    try:
+        # TENANT AWARE
+        service_item = ServiceItem.query.options(
+            joinedload(ServiceItem.linked_clauses)
+        ).filter_by(
+            id=item_id,
+            tenant_id=current_user.tenant_id # <--- SECURITY
+        ).first()
+        
+        if not service_item:
+            return jsonify({"message": "Service item not found"}), 404
+            
+        linked_clause_ids = [clause.id for clause in service_item.linked_clauses]
+        
+        return jsonify({
+            'id': service_item.id,
+            'name': service_item.name,
+            'estimated_time_mins': service_item.estimated_time_mins,
+            'linked_clause_ids': linked_clause_ids 
+        })
+        
+    except Exception as e:
+        print(f"Error fetching service item {item_id}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": "Error fetching service item."}), 500
+
+@bp.route('/admin/service-items/<int:item_id>', methods=['PUT'])
+@login_required
+def update_service_item(item_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    # TENANT AWARE
+    service_item = ServiceItem.query.filter_by(
+        id=item_id,
+        tenant_id=current_user.tenant_id
+    ).first()
+
+    if not service_item:
+        return jsonify({"message": "Service item not found"}), 404
+        
+    data = request.get_json()
+    if not data:
+        return jsonify({"message": "No data provided"}), 400
+        
+    try:
+        service_item.name = data.get('name', service_item.name)
+        service_item.estimated_time_mins = data.get('estimated_time_mins', service_item.estimated_time_mins)
+        
+        linked_clause_ids = data.get('linked_clause_ids', [])
+        
+        # Fetch clauses, ensuring they ALSO belong to this tenant
+        clauses = ServiceClause.query.filter(
+            ServiceClause.id.in_(linked_clause_ids),
+            ServiceClause.tenant_id == current_user.tenant_id
+        ).all()
+        
+        service_item.linked_clauses = clauses
+        
+        db.session.commit()
+        log_activity('Service Item Updated', f"Admin '{current_user.email}' updated service item: {service_item.name}")
+        
+        return jsonify({
+            'id': service_item.id,
+            'name': service_item.name,
+            'estimated_time_mins': service_item.estimated_time_mins
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating service item {item_id}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An error occurred: {str(e)}"}), 500
+    
+@bp.route('/admin/all-services', methods=['GET'])
+@login_required
+def get_all_services_list():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+    
+    try:
+        # TENANT AWARE
+        services = ServiceItem.query.options(
+            joinedload(ServiceItem.prices),
+            joinedload(ServiceItem.linked_clauses)
+        ).filter_by(
+            tenant_id=current_user.tenant_id # <--- SECURITY
+        ).order_by(ServiceItem.name).all()
+        
+        service_list = []
+        for item in services:
+            default_price = 0.0
+            if item.prices:
+                once_off = next((p.price for p in item.prices if 'once' in p.frequency.lower()), None)
+                default_price = once_off if once_off is not None else item.prices[0].price
+            
+            linked_clause_ids = [clause.id for clause in item.linked_clauses]
+            
+            service_list.append({
+                'id': item.id,
+                'name': item.name,
+                'default_description': item.name, 
+                'default_price': default_price,
+                'linked_clause_ids': linked_clause_ids 
+            })
+        return jsonify(service_list)
+        
+    except Exception as e:
+        print(f"Error fetching all services: {e}")
+        traceback.print_exc()
+        return jsonify({"message": "Error fetching service list."}), 500
+    
 @bp.route('/admin/jobs/<int:job_id>', methods=['DELETE'])
 @login_required
 def delete_job(job_id):
-    """
-    Deletes a specific job.
-    """
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
 
     try:
-        job = db.session.get(Job, job_id)
+        # TENANT AWARE
+        job = Job.query.filter_by(
+            id=job_id,
+            tenant_id=current_user.tenant_id
+        ).first()
+        
         if not job:
             return jsonify({"message": "Job not found."}), 404
 
-        # Revert the associated QuoteRequest status (Confirm 'Confirmed' is correct)
         if job.quote_request:
              job.quote_request.status = 'Confirmed' 
 
-        # Safely get client email and job date for logging
         client_email = job.client.email if job.client else "Unknown Client"
         job_date = job.scheduled_date
 
-        # Log before deleting
         log_activity(
             'Job Deleted',
             f"Admin '{current_user.email}' deleted job #{job.id} (Client: {client_email}, Date: {job_date})."
@@ -795,28 +1046,26 @@ def delete_job(job_id):
         traceback.print_exc()
         return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
 
-# --- START PHASE 1B IMPLEMENTATION ---
-
 @bp.route('/admin/jobs/<int:job_id>', methods=['GET'])
 @login_required
 def get_job_details(job_id):
-    """
-    Fetches the details for a single job for the Edit Modal.
-    """
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
     
     try:
+        # TENANT AWARE
         job = Job.query.options(
             joinedload(Job.client).joinedload(User.profile),
             joinedload(Job.quote_request),
-            joinedload(Job.assigned_staff) # Load assigned staff
-        ).filter(Job.id == job_id).first()
+            joinedload(Job.assigned_staff)
+        ).filter(
+            Job.id == job_id,
+            Job.tenant_id == current_user.tenant_id
+        ).first()
 
         if not job:
             return jsonify({"message": "Job not found."}), 404
         
-        # Determine client and service names
         client_name = "N/A"
         if job.client and job.client.profile:
             client_name = job.client.profile.full_name or job.client.email
@@ -825,7 +1074,6 @@ def get_job_details(job_id):
             
         service_name = job.quote_request.primary_service if job.quote_request else "N/A"
         
-        # Get the ID of the *first* assigned staff member (to match edit modal's single select)
         assigned_staff_id = job.assigned_staff[0].id if job.assigned_staff else None
 
         job_data = {
@@ -850,13 +1098,15 @@ def get_job_details(job_id):
 @bp.route('/admin/jobs/<int:job_id>', methods=['PUT'])
 @login_required
 def update_job_details(job_id):
-    """
-    Updates a job's details from the Edit Modal.
-    """
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
         
-    job = Job.query.options(joinedload(Job.assigned_staff)).filter(Job.id == job_id).first()
+    # TENANT AWARE
+    job = Job.query.options(joinedload(Job.assigned_staff)).filter(
+        Job.id == job_id,
+        Job.tenant_id == current_user.tenant_id
+    ).first()
+    
     if not job:
         return jsonify({"message": "Job not found."}), 404
 
@@ -865,7 +1115,6 @@ def update_job_details(job_id):
         return jsonify({"message": "No data provided."}), 400
 
     try:
-        # Extract and validate data
         scheduled_date_str = data.get('scheduled_date')
         scheduled_time_str = data.get('start_time')
         staff_id = data.get('staff_id')
@@ -875,29 +1124,28 @@ def update_job_details(job_id):
         if not all([scheduled_date_str, scheduled_time_str, staff_id, status]):
              return jsonify({"message": "Missing required fields (Date, Time, Staff, Status)."}), 400
              
-        # Parse date and time
         job.scheduled_date = datetime.strptime(scheduled_date_str, '%Y-%m-%d').date()
         job.start_time = datetime.strptime(scheduled_time_str, '%H:%M').time()
         
-        # Validate status
         allowed_statuses = ['Scheduled', 'In Progress', 'Completed', 'Cancelled']
         if status not in allowed_statuses:
             return jsonify({"message": "Invalid status value."}), 400
         job.status = status
-        
-        # Update notes
         job.notes = notes
 
-        # Update staff assignment (handling single-assignment assumption)
-        new_staff_user = db.session.get(User, staff_id)
-        if not new_staff_user or new_staff_user.role != 'staff':
+        # Ensure staff belongs to THIS tenant
+        new_staff_user = User.query.filter_by(
+            id=staff_id, 
+            role='staff',
+            tenant_id=current_user.tenant_id
+        ).first()
+        
+        if not new_staff_user:
             return jsonify({"message": "Invalid staff member selected."}), 404
             
-        # Clear existing staff and add new one
         job.assigned_staff.clear()
         job.assigned_staff.append(new_staff_user)
 
-        # Log activity
         log_activity(
             'Job Updated', 
             f"Admin '{current_user.email}' updated job #{job.id}."
@@ -919,13 +1167,15 @@ def update_job_details(job_id):
 @bp.route('/admin/jobs/update_status/<int:job_id>', methods=['POST'])
 @login_required
 def update_job_status(job_id):
-    """
-    Quick update for a job's status from the table dropdown.
-    """
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
 
-    job = db.session.get(Job, job_id)
+    # TENANT AWARE
+    job = Job.query.filter_by(
+        id=job_id,
+        tenant_id=current_user.tenant_id
+    ).first()
+    
     if not job:
         return jsonify({"message": "Job not found."}), 404
         
@@ -956,8 +1206,6 @@ def update_job_status(job_id):
         traceback.print_exc()
         return jsonify({"message": f"An internal server error occurred: {str(e)}"}), 500
 
-# --- END PHASE 1B IMPLEMENTATION ---
-
 @bp.route('/admin/staff/<int:user_id>', methods=['GET'])
 @login_required
 def get_staff_details(user_id):
@@ -965,22 +1213,22 @@ def get_staff_details(user_id):
         return jsonify({"message": "Permission denied"}), 403
 
     try:
-        # Fetch staff member with their profile data
+        # TENANT AWARE
         staff_member = User.query.options(joinedload(User.profile)).filter(
-            User.id == user_id, User.role == 'staff'
+            User.id == user_id, 
+            User.role == 'staff',
+            User.tenant_id == current_user.tenant_id
         ).first()
 
         if not staff_member:
             return jsonify({"message": "Staff member not found"}), 404
 
-        # Calculate age if date_of_birth exists
         age = None
         if staff_member.profile and staff_member.profile.date_of_birth:
             today = date.today()
             dob = staff_member.profile.date_of_birth
             age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
-        # Prepare profile data, handling potential None values
         profile_data = {}
         if staff_member.profile:
             profile_data = {
@@ -993,13 +1241,12 @@ def get_staff_details(user_id):
                 "age": age,
                 "strengths": staff_member.profile.strengths or '',
                 "notes": staff_member.profile.notes or '',
-                "documents": staff_member.profile.documents or [], # Ensure it's a list
+                "documents": staff_member.profile.documents or [], 
                 "has_id_copy": staff_member.profile.has_id_copy or False,
                 "has_drivers_license": staff_member.profile.has_drivers_license or False,
                 "has_criminal_check": staff_member.profile.has_criminal_check or False,
-                # Add banking details if needed later
             }
-        else: # Default if profile is missing
+        else: 
              profile_data = {
                 "full_name": 'N/A', "phone_number": 'N/A', "address": 'N/A', "profile_image": 'avatar_picture_profile_user_icon.png',
                 "id_number": 'N/A', "date_of_birth": 'N/A', "age": None, "strengths": '', "notes": '', "documents": [],
@@ -1010,7 +1257,6 @@ def get_staff_details(user_id):
             "id": staff_member.id,
             "email": staff_member.email,
             "profile": profile_data,
-            # Add job history or other relevant data if needed
         }
         return jsonify(staff_data)
 
@@ -1024,47 +1270,42 @@ def update_staff_details(user_id):
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
 
+    # TENANT AWARE
     staff_member = User.query.options(joinedload(User.profile)).filter(
-        User.id == user_id, User.role == 'staff'
+        User.id == user_id, 
+        User.role == 'staff',
+        User.tenant_id == current_user.tenant_id
     ).first()
 
     if not staff_member or not staff_member.profile:
         return jsonify({"message": "Staff member or profile not found"}), 404
 
-    # Use request.form for text fields when using multipart/form-data
-    # Use EditStaffForm fields as a guide for expected data
     profile = staff_member.profile
     profile.full_name = request.form.get('full_name', profile.full_name)
     profile.phone_number = request.form.get('phone_number', profile.phone_number)
     profile.address = request.form.get('address', profile.address)
     profile.id_number = request.form.get('id_number', profile.id_number)
     profile.strengths = request.form.get('strengths', profile.strengths)
-    profile.notes = request.form.get('notes', profile.notes) # Assuming notes field exists
+    profile.notes = request.form.get('notes', profile.notes)
 
-    # Handle boolean checkboxes (value will be 'true' or 'false' string from FormData)
     profile.has_id_copy = request.form.get('has_id_copy') == 'true'
     profile.has_drivers_license = request.form.get('has_drivers_license') == 'true'
     profile.has_criminal_check = request.form.get('has_criminal_check') == 'true'
 
     try:
-        # --- Handle Profile Picture Upload ---
         if 'profile_image' in request.files:
             file = request.files['profile_image']
             if file and file.filename != '':
-                # Consider adding ALLOWED_EXTENSIONS check from config.py if needed
                 filename = secure_filename(file.filename)
                 unique_filename = str(uuid.uuid4()) + "_" + filename
                 upload_path = os.path.join(current_app.config['UPLOAD_FOLDER'], unique_filename)
-                # TODO: Delete old profile image file if replacing
                 file.save(upload_path)
                 profile.profile_image = unique_filename
-                print(f"Profile image saved to: {upload_path}")
 
-        # --- Handle Document Uploads ---
         if 'upload_documents' in request.files:
             uploaded_files = request.files.getlist('upload_documents')
             new_filenames = []
-            if profile.documents is None: # Initialize if null
+            if profile.documents is None: 
                 profile.documents = []
 
             for file in uploaded_files:
@@ -1075,19 +1316,17 @@ def update_staff_details(user_id):
                     new_filenames.append(unique_filename)
 
             if new_filenames:
-                # Append new documents to existing list
                 profile.documents.extend(new_filenames)
-                flag_modified(profile, "documents") # Mark JSON field as modified for SQLAlchemy
+                flag_modified(profile, "documents") 
 
         db.session.commit()
         log_activity('Staff Updated (API)', f"Admin '{current_user.email}' updated profile for {staff_member.email}")
 
-        # Fetch updated data to return (optional but good for UI sync)
-        updated_data = get_staff_details(user_id).get_json() # Reuse the GET endpoint logic
+        updated_data = get_staff_details(user_id).get_json() 
 
         return jsonify({
             "message": "Staff profile updated successfully.",
-            "staffMember": updated_data # Return updated data
+            "staffMember": updated_data 
         })
 
     except Exception as e:
@@ -1102,12 +1341,12 @@ def api_add_staff():
         return jsonify({"message": "Permission denied"}), 403
 
     data = request.json
-    form = AddStaffForm(data=data) # Use WTForms for validation
+    form = AddStaffForm(data=data) 
     
-    # ** Get the new checkbox value from the JSON payload **
-    send_email = data.get('send_activation_email', False) # Default to False if not provided
+    send_email = data.get('send_activation_email', False) 
 
     if form.validate():
+        # Check if email exists globally
         if User.query.filter_by(email=form.email.data).first():
             return jsonify({'message': 'A user with this email already exists.'}), 400
 
@@ -1116,7 +1355,8 @@ def api_add_staff():
                 email=form.email.data,
                 role='staff',
                 is_confirmed=True,
-                password_reset_required=True # They will need to set password
+                password_reset_required=True,
+                tenant_id=current_user.tenant_id # <--- TENANT AWARE
             )
             
             new_profile = Profile(
@@ -1124,7 +1364,8 @@ def api_add_staff():
                 full_name=form.full_name.data,
                 phone_number=form.phone_number.data,
                 address=form.address.data,
-                id_number=form.id_number.data
+                id_number=form.id_number.data,
+                tenant_id=current_user.tenant_id # <--- TENANT AWARE
             )
 
             db.session.add(new_staff)
@@ -1135,7 +1376,6 @@ def api_add_staff():
 
             success_message = f"Staff member '{form.full_name.data}' created."
 
-            # ** Conditionally send the email **
             if send_email:
                 try:
                     token = generate_confirmation_token(new_staff.id) 
@@ -1163,67 +1403,53 @@ def api_add_staff():
         errors = [f"{field}: {', '.join(error_list)}" for field, error_list in form.errors.items()]
         return jsonify({'message': f"Validation failed: {'; '.join(errors)}"}), 400
     
-# --- NEW ENDPOINT: Get all staff for dropdowns ---
 @bp.route('/admin/staff/all', methods=['GET'])
 @login_required
 def api_get_all_staff():
-    """
-    Fetches all staff members for dropdowns in the frontend.
-    Handles cases where staff might not have a profile yet.
-    """
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
     try:
-        # Use left outer join explicitly via options for clarity
-        # Order by User email as a fallback if profile is missing
+        # TENANT AWARE
         staff_list = User.query.options(joinedload(User.profile)).filter(
-            User.role == 'staff'
-        ).order_by(User.email).all() # Order by email initially
+            User.role == 'staff',
+            User.tenant_id == current_user.tenant_id
+        ).order_by(User.email).all() 
 
         staff_data = []
         for staff in staff_list:
-            # --- FIX: Check for profile existence before accessing ---
-            full_name = staff.email # Default to email
+            full_name = staff.email 
             if staff.profile and staff.profile.full_name:
                 full_name = staff.profile.full_name
-            # --- END FIX ---
                 
             staff_data.append({
                 "id": staff.id,
-                "full_name": full_name, # Use the determined name
+                "full_name": full_name,
                 "email": staff.email
             })
 
-        # Optional: Sort by full_name after constructing the list if needed
         staff_data.sort(key=lambda x: x['full_name'])
 
         return jsonify(staff_data)
         
     except Exception as e:
-        # --- FIX: Log the actual error and return 500 ---
         print(f"!!! Error in api_get_all_staff: {e}")
-        traceback.print_exc() # Print full traceback to console
-        # Return a more specific error for debugging, but still 500 status
+        traceback.print_exc() 
         return jsonify({"message": f"Internal server error fetching staff list: {str(e)}"}), 500
-        # --- END FIX ---
 
-# --- NEW ENDPOINT: Get all service items for dropdowns ---
 @bp.route('/admin/services/all_items', methods=['GET'])
 @login_required
 def api_get_all_service_items():
-    """
-    Fetches all individual service items for dropdowns in the frontend.
-    """
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
     try:
-        # Assuming your model is ServiceItem as discussed
-        service_items = ServiceItem.query.order_by(ServiceItem.name).all() 
+        # TENANT AWARE
+        service_items = ServiceItem.query.filter_by(
+            tenant_id=current_user.tenant_id
+        ).order_by(ServiceItem.name).all() 
         
         items_data = [{
             "id": item.id,
             "name": item.name
-            # Add other fields like default price if needed later
         } for item in service_items]
         
         return jsonify(items_data)
@@ -1232,14 +1458,9 @@ def api_get_all_service_items():
         return jsonify({"message": "Error fetching service item list."}), 500
 
 
-# --- NEW ENDPOINT: Manually Add a Job ---
 @bp.route('/admin/jobs/manual_add', methods=['POST'])
 @login_required
 def api_add_job_manually():
-    """
-    Handles the submission of the 'Add Manual Booking' modal.
-    Creates a client if needed, a QuoteRequest, and a Job.
-    """
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
     
@@ -1247,31 +1468,32 @@ def api_add_job_manually():
     if not data:
         return jsonify({"message": "No data provided."}), 400
         
-    # --- 1. Extract All Data ---
-    client_id = data.get('client_id') # Will be null if it's a new client
+    client_id = data.get('client_id') 
     save_new_client = data.get('save_new_client', False)
     
-    # Client details (used if save_new_client is True or if client_id is null)
     full_name = data.get('full_name')
     email = data.get('email')
     phone_number = data.get('phone_number')
-    address = data.get('address') # Address for the booking/new client profile
+    address = data.get('address') 
 
-    # Job details (all required by frontend form)
     service_item_id = data.get('service_item_id')
-    service_price_str = data.get('service_price') # Comes as string
+    service_price_str = data.get('service_price') 
     service_frequency = data.get('service_frequency')
     staff_id = data.get('staff_id')
     scheduled_date_str = data.get('scheduled_date')
     scheduled_time_str = data.get('scheduled_time')
 
-    # --- 2. Determine or Create Client ---
     client = None
     if client_id:
-        client = db.session.get(User, client_id)
-        if not client or client.role != 'client':
+        # TENANT AWARE
+        client = User.query.filter_by(
+            id=client_id,
+            role='client',
+            tenant_id=current_user.tenant_id
+        ).first()
+
+        if not client:
             return jsonify({"message": "Selected client not found."}), 404
-        # Use provided address for booking, even if existing client selected
         booking_address = address or (client.profile.address if client.profile else 'N/A')
     
     elif save_new_client:
@@ -1284,20 +1506,26 @@ def api_add_job_manually():
         
         try:
             temp_password = secrets.token_urlsafe(12)
-            new_client = User(email=email, role='client', is_confirmed=True)
+            new_client = User(
+                email=email, 
+                role='client', 
+                is_confirmed=True,
+                tenant_id=current_user.tenant_id # <--- TENANT AWARE
+            )
             new_client.set_password(temp_password)
             
             new_profile = Profile(
                 user=new_client,
                 full_name=full_name,
                 phone_number=phone_number,
-                address=address # Use the address provided in the form
+                address=address,
+                tenant_id=current_user.tenant_id # <--- TENANT AWARE
             )
             db.session.add(new_client)
             db.session.add(new_profile)
-            db.session.commit() # Commit here to get the new client's ID
+            db.session.commit() 
             client = new_client
-            booking_address = address # Address for booking is the one just entered
+            booking_address = address 
             log_activity('Client Created (Manual Booking)', f"Admin '{current_user.email}' created client: {email}")
         
         except Exception as e:
@@ -1307,86 +1535,91 @@ def api_add_job_manually():
             return jsonify({"message": "Database error creating new client."}), 500
             
     else: 
-        # Case: User typed a name/email but didn't select existing client and didn't check 'Save'
-        # We need a client ID to proceed.
          return jsonify({"message": "Please select an existing client or check 'Save as new client'."}), 400
 
-    # --- 3. Validate Job Details ---
     if not all([service_item_id, service_price_str, service_frequency, staff_id, scheduled_date_str, scheduled_time_str]):
          return jsonify({"message": "Missing required job details (Service, Price, Frequency, Staff, Date, Time)."}), 400
          
     try:
-        staff_user = db.session.get(User, staff_id)
-        if not staff_user or staff_user.role != 'staff':
+        # TENANT AWARE Staff Check
+        staff_user = User.query.filter_by(
+            id=staff_id,
+            role='staff',
+            tenant_id=current_user.tenant_id
+        ).first()
+        
+        if not staff_user:
             return jsonify({"message": "Invalid staff member selected."}), 404
             
-        service_item = db.session.get(ServiceItem, service_item_id)
+        # TENANT AWARE Service Check
+        service_item = ServiceItem.query.filter_by(
+            id=service_item_id,
+            tenant_id=current_user.tenant_id
+        ).first()
+
         if not service_item:
             return jsonify({"message": "Invalid service selected."}), 404
             
-        # Parse date, time, and price carefully
         parsed_date = datetime.strptime(scheduled_date_str, '%Y-%m-%d').date()
         parsed_time = datetime.strptime(scheduled_time_str, '%H:%M').time()
-        parsed_price = float(service_price_str) # Convert price string to float
+        parsed_price = float(service_price_str) 
         
     except ValueError as e:
         return jsonify({"message": f"Invalid data format: {e}. Ensure date is YYYY-MM-DD, time is HH:MM, and price is a number."}), 400
-    except Exception as e: # Catch other potential errors
+    except Exception as e: 
         return jsonify({"message": f"Error validating job data: {e}"}), 400
 
-    # --- 4. Create Database Records ---
     try:
-        # a) Create a related 'QuoteRequest' for data consistency
-        #    (even though it wasn't requested by the client)
         new_quote = QuoteRequest(
             user_id=client.id,
             primary_service=service_item.name,
-            property_type="N/A (Manual)", # Indicate it was manually added
+            property_type="N/A (Manual)", 
             service_frequency=service_frequency,
-            address=booking_address, # Use the address determined earlier
+            address=booking_address, 
             total_price=parsed_price,
-            status='Scheduled' # Mark as scheduled immediately
+            status='Scheduled',
+            tenant_id=current_user.tenant_id # <--- TENANT AWARE
         )
         db.session.add(new_quote)
-        db.session.flush() # Use flush to get the ID before full commit
+        db.session.flush() 
         
-        # b) Create the actual 'Job' record
         new_job = Job(
-            quote_request_id=new_quote.id, # Link to the placeholder quote
+            quote_request_id=new_quote.id, 
             client_id=client.id,
             service_id=service_item.id,
             scheduled_date=parsed_date,
             start_time=parsed_time,
             status='Scheduled',
-            notes=f"Job manually created by admin {current_user.email}."
-            # Add price to Job if your model has it, e.g., estimated_price=parsed_price
+            notes=f"Job manually created by admin {current_user.email}.",
+            tenant_id=current_user.tenant_id # <--- TENANT AWARE
         )
-        new_job.assigned_staff.append(staff_user) # Assign staff
+        new_job.assigned_staff.append(staff_user) 
         db.session.add(new_job)
         
-        # c) Log the activity
         log_activity(
             'Manual Job Created', 
             f"Admin '{current_user.email}' created job #{new_job.id} for {client.email}. Assigned to {staff_user.profile.full_name}."
         )
         
-        # d) Commit everything
         db.session.commit()
         
         return jsonify({
             "message": "Manual job created successfully!",
             "job_id": new_job.id
-        }), 201 # 201 Created status
+        }), 201 
 
     except Exception as e:
-        db.session.rollback() # Rollback all changes if any part fails
+        db.session.rollback() 
         print(f"Error saving manual job: {e}")
         traceback.print_exc()
         return jsonify({"message": f"An internal server error occurred while saving the job: {str(e)}"}), 500
 
 @bp.route('/posts')
 def posts():
-    # ... (posts implementation) ...
+    # PUBLIC ROUTE: Needs to handle tenancy via domain or fallback to "main" tenant
+    # For now, fetching ALL published posts from ALL tenants (Marketplace style?)
+    # Or strict to one tenant if subdomain logic exists. 
+    # DEFAULT: Fetch all.
     posts = Post.query.filter_by(is_published=True).order_by(Post.created_date.desc()).limit(3).all()
     posts_data = [{
         "id": post.id,
@@ -1396,68 +1629,17 @@ def posts():
     } for post in posts]
     return jsonify(posts_data)
 
-
-@bp.route('/services')
-def services():
-    # ... (services implementation) ...
-    categories = ServiceCategory.query.options(db.joinedload(ServiceCategory.items).joinedload(ServiceItem.prices)).order_by(ServiceCategory.name).all()
-    output = []
-    for category in categories:
-        cat_data = {
-            'id': category.id, 'name': category.name, 'description': category.description,
-            'calculation_method': category.calculation_method, 'items': []
-        }
-        for item in category.items:
-            item_data = {
-                'id': item.id, 'name': item.name, 'estimated_time_mins': item.estimated_time_mins,
-                'prices': [{'frequency': p.frequency, 'price': p.price} for p in item.prices]
-            }
-            cat_data['items'].append(item_data)
-        output.append(cat_data)
-    return jsonify(output)
-
-
-@bp.route('/availability/<string:date_str>')
-def availability(date_str):
-    # ... (availability implementation) ...
-    from datetime import time, timedelta # Added for clarity, though it might be covered by imports above
-    try:
-        booking_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        return jsonify({'error': 'Invalid date format'}), 400
-
-    opening_time = time(8, 0)
-    closing_time = time(17, 0)
-    slot_interval_mins = 30
-    
-    existing_jobs_on_day = Job.query.filter(Job.scheduled_date == booking_date).all()
-    
-    available_slots = []
-    current_time_dt = datetime.combine(booking_date, opening_time)
-    end_of_day_dt = datetime.combine(booking_date, closing_time)
-
-    while current_time_dt < end_of_day_dt:
-        slot_is_available = True
-        for job in existing_jobs_on_day:
-            if job.start_time and current_time_dt.time() == job.start_time:
-                slot_is_available = False
-                break
-        
-        if slot_is_available:
-            available_slots.append(current_time_dt.strftime('%H:%M'))
-
-        current_time_dt += timedelta(minutes=slot_interval_mins)
-
-    return jsonify(available_slots)
-
-
 @bp.route('/recent-activity')
 @login_required
 def recent_activity():
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"error": "Permission denied"}), 403
 
-    logs = ActivityLog.query.order_by(ActivityLog.timestamp.desc()).limit(5).all()
+    # TENANT AWARE
+    logs = ActivityLog.query.filter_by(
+        tenant_id=current_user.tenant_id
+    ).order_by(ActivityLog.timestamp.desc()).limit(5).all()
+    
     sast_timezone = pytz.timezone('Africa/Johannesburg')
 
     recent_logs = [{
@@ -1468,113 +1650,6 @@ def recent_activity():
     
     return jsonify(recent_logs)
 
-
-@bp.route('/contact', methods=['POST'])
-def contact():
-    data = request.json
-    if not data or not data.get('name') or not data.get('email') or not data.get('message'):
-         return jsonify({"status": "error", "message": "Name, Email, and Message are required."}), 400
-         
-    try:
-        # Create a QuoteRequest object instead
-        new_request = QuoteRequest(
-            name=data.get('name'), 
-            email=data.get('email'), 
-            phone=data.get('phone'), 
-            # Map 'area' to 'address' or keep as 'N/A' if distinct
-            address=data.get('area', 'N/A'), # Or create a separate 'area' column if needed
-            description=data.get('message'), # Map 'message' to 'description'
-            subject="Contact Form Submission", # Set a default subject
-            status='Pending', # Use the unified status field
-            request_date=datetime.utcnow() # Set the date
-        )
-        db.session.add(new_request)
-        db.session.commit()
-        
-        # Update log message if desired
-        log_activity("Contact Form Submission", f"New site contact form submission from {data.get('name')}.") 
-        
-        # Email sending logic could go here if needed for contact form specifically
-        
-        return jsonify({"status": "ok", "message": "Thank you! Your message has been sent."}) # Slightly different message maybe?
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"API Contact Error: {e}") # Use logger
-        traceback.print_exc() # Print traceback
-        return jsonify({"status": "error", "message": "An unexpected error occurred processing your contact request."}), 500
-
-
-@bp.route('/staff_apply', methods=['POST'])
-def staff_apply():
-    # ... (staff_apply implementation) ...
-    import os
-    import uuid
-    from datetime import date # Already imported
-    from werkzeug.utils import secure_filename # Already imported
-    
-    try:
-        id_number = request.form.get('id_number')
-        age = 0 # Placeholder if ID number isn't valid/provided
-        if id_number and len(id_number) == 13:
-            try: # Add error handling for year calculation
-                current_year = int(str(date.today().year)[2:])
-                birth_year = int(id_number[:2])
-                # Basic age calc - might be off by 1 year depending on month/day
-                age = current_year - birth_year if current_year >= birth_year else (100 + current_year) - birth_year
-            except ValueError:
-                age = 0 # Default if ID parsing fails
-
-        new_application = StaffApplication(
-            full_name=request.form.get('full_name'),
-            id_number=id_number, # Store ID number regardless of age calc
-            # age=age, # Storing age might not be necessary if DOB is captured later
-            phone_number=request.form.get('phone_number'),
-            email=request.form.get('email'),
-            address=request.form.get('address')
-        )
-
-        uploaded_filenames = []
-        files = request.files.getlist('documents')
-        if files:
-            for file in files:
-                if file and file.filename != '':
-                    filename = secure_filename(file.filename)
-                    unique_filename = str(uuid.uuid4()) + "_" + filename
-                    file.save(os.path.join(current_app.config['UPLOAD_FOLDER'], unique_filename))
-                    uploaded_filenames.append(unique_filename)
-        
-        if uploaded_filenames:
-            new_application.document_filenames = uploaded_filenames
-
-        db.session.add(new_application)
-        db.session.commit()
-        log_activity("Staff Application", f"New staff application from {request.form.get('full_name')}.")
-        # Email notification logic would go here
-        return jsonify({"status": "ok", "message": "Application submitted successfully."})
-    except Exception as e:
-        db.session.rollback()
-        print(f"API Staff Apply Error: {e}")
-        return jsonify({"status": "error", "message": "An unexpected error occurred."}), 500
-
-
-@bp.route('/quote', methods=['POST'])
-@login_required
-def quote():
-    # ... (quote implementation) ...
-    data = request.json or {}
-    new_quote_request = QuoteRequest(
-        property_type=data.get('property-type'),
-        primary_service=data.get('primary-service'),
-        service_frequency=data.get('service-frequency'),
-        user_id=current_user.id
-    )
-    db.session.add(new_quote_request)
-    log_activity('New Quote Request', f"User '{current_user.email}' submitted a new quote request.", user_id=current_user.id)
-    db.session.commit()
-    flash("Thank you! We've received your quote request.", "success")
-    return jsonify({"status": "ok", "message": "Quote request received."})
-
 @bp.route('/admin/jobs/current', methods=['GET'])
 @login_required
 def get_current_jobs():
@@ -1582,13 +1657,13 @@ def get_current_jobs():
         return jsonify({"message": "Permission denied"}), 403
 
     try:
-        # Fetch jobs that are scheduled or in progress
-        # Eagerly load related data for efficiency
+        # TENANT AWARE
         current_jobs = Job.query.options(
             joinedload(Job.quote_request).joinedload(QuoteRequest.user).joinedload(User.profile),
-            joinedload(Job.assigned_staff).joinedload(User.profile) # Also load staff profiles
+            joinedload(Job.assigned_staff).joinedload(User.profile) 
         ).filter(
-            Job.status.in_(['Scheduled', 'In-Progress'])
+            Job.status.in_(['Scheduled', 'In-Progress']),
+            Job.tenant_id == current_user.tenant_id # <--- TENANT AWARE
         ).order_by(Job.scheduled_date.asc(), Job.start_time.asc()).all()
 
         jobs_data = []
@@ -1602,12 +1677,12 @@ def get_current_jobs():
             assigned_staff_names = [
                 staff.profile.full_name or staff.email
                 for staff in job.assigned_staff if staff.profile
-            ] or ["None"] # Use ["None"] if list is empty
+            ] or ["None"] 
 
             jobs_data.append({
                 "id": job.id,
                 "scheduled_date": job.scheduled_date.strftime('%d %b %Y') if job.scheduled_date else 'N/A',
-                "scheduled_date_iso": job.scheduled_date.isoformat() if job.scheduled_date else None, # <-- ADD THIS LINE
+                "scheduled_date_iso": job.scheduled_date.isoformat() if job.scheduled_date else None,
                 "start_time": job.start_time.strftime('%H:%M') if job.start_time else '--:--',
                 "client_name": client_name,
                 "service": primary_service,
@@ -1620,7 +1695,6 @@ def get_current_jobs():
         print(f"Error fetching current jobs: {e}")
         return jsonify({"message": "Error fetching current job data."}), 500
 
-# --- NEW: API Endpoint for New Confirmed Bookings ---
 @bp.route('/admin/bookings/new', methods=['GET'])
 @login_required
 def get_new_bookings():
@@ -1628,11 +1702,12 @@ def get_new_bookings():
         return jsonify({"message": "Permission denied"}), 403
 
     try:
-        # Fetch QuoteRequests with status 'Confirmed'
+        # TENANT AWARE
         new_bookings = QuoteRequest.query.options(
             joinedload(QuoteRequest.user).joinedload(User.profile)
         ).filter(
-            QuoteRequest.status == 'Confirmed'
+            QuoteRequest.status == 'Confirmed',
+            QuoteRequest.tenant_id == current_user.tenant_id # <--- TENANT AWARE
         ).order_by(QuoteRequest.request_date.desc()).all()
 
         bookings_data = []
@@ -1651,9 +1726,9 @@ def get_new_bookings():
                 "client_phone": client_phone,
                 "service": req.primary_service or "N/A",
                 "property_type": req.property_type or "N/A",
-                "address": req.address or "N/A", # Assuming address might be added to QuoteRequest
+                "address": req.address or "N/A", 
                 "total_price": req.total_price if req.total_price is not None else 'N/A',
-                "user_id": req.user_id # Include user_id if needed for links
+                "user_id": req.user_id 
             })
         return jsonify(bookings_data)
     except Exception as e:
@@ -1669,57 +1744,70 @@ def schedule_new_job_from_quote():
     data = request.get_json()
     quote_request_id = data.get('quote_request_id')
     staff_id = data.get('staff_id')
-    scheduled_date_str = data.get('scheduled_date') # Expecting YYYY-MM-DD
-    scheduled_time_str = data.get('scheduled_time') # Expecting HH:MM
+    scheduled_date_str = data.get('scheduled_date') 
+    scheduled_time_str = data.get('scheduled_time') 
 
     if not all([quote_request_id, staff_id, scheduled_date_str, scheduled_time_str]):
         return jsonify({"message": "Missing required fields (Booking ID, Staff, Date, Time)."}), 400
 
     try:
-        quote = db.session.get(QuoteRequest, quote_request_id)
+        # TENANT AWARE
+        quote = QuoteRequest.query.filter_by(
+            id=quote_request_id,
+            tenant_id=current_user.tenant_id
+        ).first()
+        
         if not quote:
             return jsonify({"message": "Booking Request not found."}), 404
         if quote.status != 'Confirmed':
             return jsonify({"message": "This booking is not confirmed or has already been scheduled."}), 400
 
-        staff_user = db.session.get(User, staff_id)
-        if not staff_user or staff_user.role != 'staff':
+        staff_user = User.query.filter_by(
+            id=staff_id,
+            role='staff',
+            tenant_id=current_user.tenant_id
+        ).first()
+        
+        if not staff_user:
             return jsonify({"message": "Invalid staff member selected."}), 404
             
         client = db.session.get(User, quote.user_id)
         if not client or client.role != 'client':
             return jsonify({"message": "Associated client account not found."}), 404
 
-        # --- Ensure you query ServiceItem ---
-        service_item = ServiceItem.query.filter_by(name=quote.primary_service).first()
+        # TENANT AWARE Service Lookup
+        service_item = ServiceItem.query.filter_by(
+            name=quote.primary_service,
+            tenant_id=current_user.tenant_id
+        ).first()
+        
         if not service_item:
-            print(f"Data Mismatch: Could not find ServiceItem with name '{quote.primary_service}' for QuoteRequest ID {quote.id}")
             return jsonify({"message": f"Service '{quote.primary_service}' not found in Service list."}), 404
 
-        # --- FIX: Parse date and time separately ---
         try:
             parsed_date = datetime.strptime(scheduled_date_str, '%Y-%m-%d').date()
             parsed_time = datetime.strptime(scheduled_time_str, '%H:%M').time()
         except ValueError:
             return jsonify({"message": "Invalid date or time format. Use YYYY-MM-DD and HH:MM."}), 400
-        # --- END FIX ---
 
         new_job = Job(
             quote_request_id=quote.id,
             client_id=client.id,
-            service_id=service_item.id, # Use service_item.id
-            scheduled_date=parsed_date,  # Use parsed date
-            start_time=parsed_time,      # Use parsed time
+            service_id=service_item.id, 
+            scheduled_date=parsed_date,  
+            start_time=parsed_time,      
             status='Scheduled',
-            notes=f"Job scheduled from QuoteRequest #{quote.id}. Address: {quote.address or 'N/A'}"
+            notes=f"Job scheduled from QuoteRequest #{quote.id}. Address: {quote.address or 'N/A'}",
+            tenant_id=current_user.tenant_id # <--- TENANT AWARE
         )
         
         new_job.assigned_staff.append(staff_user)
-        quote.status = 'Scheduled' # Update quote status
+        quote.status = 'Scheduled' 
         
         log_entry = ActivityLog(
             user_id=current_user.id,
-            action=f"Scheduled job for booking #{quote.id}. Assigned to {staff_user.profile.full_name}."
+            action=f"Scheduled job for booking #{quote.id}. Assigned to {staff_user.profile.full_name}.",
+            tenant_id=current_user.tenant_id
         )
 
         db.session.add(new_job)
@@ -1744,11 +1832,15 @@ def get_new_booking_detail(quote_id):
         return jsonify({"message": "Permission denied"}), 403
 
     try:
-        req = db.session.get(QuoteRequest, quote_id)
+        # TENANT AWARE
+        req = QuoteRequest.query.filter_by(
+            id=quote_id,
+            tenant_id=current_user.tenant_id
+        ).first()
+        
         if not req:
             return jsonify({"message": "Booking request not found."}), 404
         
-        # Ensure it's a 'Confirmed' booking
         if req.status != 'Confirmed':
              return jsonify({"message": "This booking is not in a 'Confirmed' state."}), 400
 
@@ -1784,16 +1876,17 @@ def get_scheduled_jobs():
         return jsonify({"message": "Permission denied"}), 403
 
     try:
-        # Fetch all Job records, joining related data we need
+        # TENANT AWARE
         jobs = Job.query.options(
             joinedload(Job.client).joinedload(User.profile),
             joinedload(Job.service),
-            joinedload(Job.assigned_staff).joinedload(User.profile) # Load staff user and their profile
+            joinedload(Job.assigned_staff).joinedload(User.profile) 
+        ).filter(
+            Job.tenant_id == current_user.tenant_id
         ).order_by(Job.scheduled_date.desc()).all()
 
         jobs_data = []
         for job in jobs:
-            # Combine staff names
             staff_names = ", ".join(
                 [staff.profile.full_name for staff in job.assigned_staff if staff.profile]
             ) or 'N/A'
@@ -1820,9 +1913,11 @@ def get_all_quotes():
         combined_list = []
         sast = pytz.timezone('Africa/Johannesburg') 
 
-        # 1. Get all QuoteRequests (Leads)
+        # 1. Get all QuoteRequests (Leads) - TENANT AWARE
         quote_requests = QuoteRequest.query.options(
             joinedload(QuoteRequest.user).joinedload(User.profile)
+        ).filter(
+            QuoteRequest.tenant_id == current_user.tenant_id
         ).all()
         
         for req in quote_requests:
@@ -1842,8 +1937,8 @@ def get_all_quotes():
 
             combined_list.append({
                 "id": req.id,
-                "type": "request", # <-- Identifies this as a request
-                "list_id": f"req_{req.id}", # Unique ID for React key
+                "type": "request", 
+                "list_id": f"req_{req.id}", 
                 "request_date": formatted_date, 
                 "client_name": client_name or "N/A",
                 "client_phone": client_phone or "N/A",
@@ -1852,19 +1947,20 @@ def get_all_quotes():
                 "frequency": req.service_frequency or "N/A",
                 "total_price": req.total_price,
                 "status": req.status or "Unknown",
-                "view_url": f"/quotes/{req.id}", # Links to the React QuoteDetail page
+                "view_url": f"/quotes/{req.id}", 
                 "user_id": req.user_id
             })
 
-        # 2. Get all formal Quotes (Manually created)
+        # 2. Get all formal Quotes (Manually created) - TENANT AWARE
         formal_quotes = Quote.query.options(
             joinedload(Quote.user).joinedload(User.profile)
+        ).filter(
+            Quote.tenant_id == current_user.tenant_id
         ).all()
 
         for quote in formal_quotes:
             formatted_date = 'N/A'
             if quote.quote_date:
-                # .quote_date is a Date object, not Datetime. No timezone conversion.
                 formatted_date = quote.quote_date.strftime('%d %b %Y')
 
             client_name = quote.guest_name
@@ -1877,27 +1973,24 @@ def get_all_quotes():
 
             combined_list.append({
                 "id": quote.id,
-                "type": "quote", # <-- Identifies this as a formal quote
-                "list_id": f"quote_{quote.id}", # Unique ID for React key
-                "request_date": formatted_date, # Use same field name for sorting
+                "type": "quote", 
+                "list_id": f"quote_{quote.id}", 
+                "request_date": formatted_date, 
                 "client_name": client_name or "N/A",
                 "client_phone": client_phone or "N/A",
-                "service": f"Formal Quote ({quote.quote_number})", # Distinguish it
+                "service": f"Formal Quote ({quote.quote_number})", 
                 "property_type": "N/A",
                 "frequency": "N/A",
-                "total_price": quote.total, # Use same field name
+                "total_price": quote.total, 
                 "status": quote.status or "Unknown",
-                "view_url": f"/quotes/formal/{quote.id}", # This view page doesn't exist yet, but we'll add it later
+                "view_url": f"/quotes/formal/{quote.id}", 
                 "user_id": quote.user_id
             })
             
-        # 3. Sort combined list by date (handling mixed datetime/date strings)
         def sort_key(item):
             try:
-                # Try parsing as datetime first
                 return datetime.strptime(item['request_date'], '%d %b %Y, %H:%M')
             except ValueError:
-                # Fallback to parsing as date
                 return datetime.strptime(item['request_date'], '%d %b %Y')
 
         combined_list.sort(key=sort_key, reverse=True)
@@ -1909,7 +2002,6 @@ def get_all_quotes():
         traceback.print_exc() 
         return jsonify({"message": "Error fetching quote data."}), 500
     
-# --- NEW: API Endpoint for All Invoices ---
 @bp.route('/admin/invoices', methods=['GET'])
 @login_required
 def get_all_invoices():
@@ -1917,157 +2009,115 @@ def get_all_invoices():
         return jsonify({"message": "Permission denied"}), 403
 
     try:
-        # Fetch all Invoices, ordered by issue date descending
-        # Eagerly load related user and profile data via the client relationship
-        # Assuming Invoice model has a relationship like client = db.relationship('User', backref='invoices')
-        invoices = Invoice.query.options(
-            joinedload(Invoice.client).joinedload(User.profile)
+        # 1. SIMPLIFIED QUERY: Fetch invoices for this tenant without forcing complex joins
+        invoices = Invoice.query.filter_by(
+            tenant_id=current_user.tenant_id
         ).order_by(Invoice.invoice_date.desc()).all()
 
         invoices_data = []
         for inv in invoices:
-            client_name = "N/A"
-            if inv.client:
-                 client_name = inv.client.profile.full_name or inv.client.email if inv.client.profile else inv.client.email
+            # 2. Safe Client Name Lookup
+            # We try to get the name from the relationship, but fallback safely if missing
+            client_name = "Unknown Client"
+            
+            try:
+                if inv.user:
+                    # Try to get profile name, fallback to email
+                    if inv.user.profile and inv.user.profile.full_name:
+                        client_name = inv.user.profile.full_name
+                    else:
+                        client_name = inv.user.email
+            except Exception:
+                client_name = "Client Data Error"
 
             invoices_data.append({
                 "id": inv.id,
-                "invoice_number": inv.invoice_number or f"INV-{inv.id}", # Generate if missing
+                "invoice_number": inv.invoice_number or f"INV-{inv.id}", 
                 "client_name": client_name,
-                "client_id": inv.client_id,
+                "client_id": inv.user_id,
                 "issue_date": inv.invoice_date.strftime('%d %b %Y') if inv.invoice_date else 'N/A',
                 "due_date": inv.due_date.strftime('%d %b %Y') if inv.due_date else 'N/A',
-                "total_amount": inv.total_amount if inv.total_amount is not None else None, # Return as number or null
-                "status": inv.status or "Unknown" # e.g., 'Paid', 'Unpaid', 'Overdue'
+                "total_amount": inv.total if inv.total is not None else 0.0, 
+                "status": inv.status or "Unknown",
+                "payment_token": inv.payment_token
             })
-        return jsonify(invoices_data)
-    except Exception as e:
-    # Print the exception AND the full traceback
-        print(f"Error fetching all invoices: {e}") 
-    traceback.print_exc() # <--- ADD THIS LINE
-    return jsonify({"message": "Error fetching invoice data."}), 500
-
-@bp.route('/request-quote', methods=['POST'])
-def request_quote():
-    data = request.get_json()
-    
-    if not data or not all(k in data for k in ['name', 'email', 'phone', 'address', 'description']):
-        return jsonify({'status': 'error', 'message': 'Missing required fields.'}), 400
-
-    try:
-        # Find the category name from its ID
-        category_name = "Specialized Quote (General)"
-
-        new_quote = QuoteRequest()
-
-        # Now, set the attributes individually
-        new_quote.name = data['name'] 
-        new_quote.email = data['email']
-        new_quote.phone = data['phone']
-        new_quote.address = data.get('address')
-        new_quote.service_category_name = category_name 
-        new_quote.description = data['description']
-        new_quote.status = 'Pending'
-        new_quote.request_date = datetime.utcnow()
-        
-        # If the user is logged in, associate the quote with them
-        if current_user.is_authenticated:
-            new_quote.user_id = current_user.id
             
-        db.session.add(new_quote)
-        db.session.commit()
-
-        admin_email = current_app.config['MAIL_USERNAME']
-        logo_url = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
-        
-        # 1. Render the HTML body HERE in the main request context
-        #    The nl2br filter registered in __init__.py will be found now.
-        html_body_rendered = render_template('email/admin_quote_notification.html', 
-                                             data=data, 
-                                             category_name=category_name, 
-                                             logo_url=logo_url)
-        
-        # 2. Create the Message object using the pre-rendered HTML string
-        msg = Message(subject=f"[Nieuwburg Blitz] New Specialized Quote Request - {data['name']}",
-                      sender=current_app.config['MAIL_USERNAME'],
-                      recipients=[admin_email],
-                      html=html_body_rendered) # <-- Use the rendered string
-        
-        # 3. Pass the app object and the complete message to the async function
-        send_async_email(current_app._get_current_object(), msg)
-        # ------------------------------------------
-        
-        return jsonify({'status': 'ok', 'message': 'Your quote request has been sent! We will be in touch soon.'})
+        return jsonify(invoices_data)
 
     except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Error processing quote request: {e}")
-        return jsonify({'status': 'error', 'message': 'An internal error occurred. Please try again later.'}), 500
+        print(f"Error fetching all invoices: {e}") 
+        traceback.print_exc() 
+        return jsonify({"message": "Error fetching invoice data."}), 500
 
-@bp.route('/create_booking', methods=['POST'])
-def create_booking():
-    # ... (create_booking implementation) ...
-    data = request.json
+@bp.route('/admin/invoices/<int:invoice_id>/send', methods=['POST'])
+@login_required
+def api_send_invoice(invoice_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+
+    # 1. Fetch Invoice (Tenant Aware)
+    invoice = Invoice.query.options(
+        joinedload(Invoice.user).joinedload(User.profile),
+        joinedload(Invoice.line_items)
+    ).filter_by(
+        id=invoice_id,
+        tenant_id=current_user.tenant_id
+    ).first()
+
+    if not invoice:
+        return jsonify({"message": "Invoice not found"}), 404
+
+    recipient_email = invoice.user.email
+    if not recipient_email:
+        return jsonify({"message": "Client has no email address."}), 400
+
     try:
-        customer_email = data.get('email')
-        customer_name = data.get('name')
+        # 2. Generate PDF
+        logo_path = os.path.join(current_app.root_path, 'static', 'img', 'LogoBlackWithTitle.png')
         
-        user = User.query.filter_by(email=customer_email).first()
-        if not user:
-            guest_password = str(uuid.uuid4())
-            user = User(email=customer_email, role='client')
-            user.set_password(guest_password)
-            db.session.add(user)
-            profile = Profile(user=user, full_name=customer_name, phone_number=data.get('phone'), address=data.get('address'))
-            db.session.add(profile)
-            db.session.flush()
-
-        new_request = QuoteRequest(
-            user_id=user.id,
-            primary_service=data.get('categoryName'),
-            property_type=data.get('frequency'),
-            address=data.get('address'),
-            total_price=float(data.get('totalPrice')),
-            service_details=json.dumps(data.get('services')),
-            status='Pending'
+        # Ensure you have 'templates/public/invoice_pdf_template.html'
+        pdf_data = render_template_to_pdf(
+            'public/invoice_pdf_template.html', 
+            invoice=invoice,
+            logo_url=logo_path
         )
-        db.session.add(new_request)
-        db.session.commit()
 
-        return jsonify({'status': 'ok', 'message': 'Booking request received.', 'booking_id': new_request.id})
+        if not pdf_data:
+            return jsonify({"message": "Failed to generate PDF attachment."}), 500
+
+        # 3. Prepare Email Data
+        payment_url = url_for('main.public_invoice_pay', token=invoice.payment_token, _external=True)
+        # In production, logo_url should be a hosted URL, but for local dev we might just omit it or use CID
+        # For simplicity, we pass None to the template if we can't link a public image yet
+        
+        email_html = render_template(
+            'email/send_invoice.html',
+            invoice=invoice,
+            payment_url=payment_url,
+            business_name="Nieuwburg Blitz", # Or fetch from BusinessSettings
+            logo_url=None 
+        )
+
+        # 4. Send Email
+        filename = f"Invoice_{invoice.invoice_number}.pdf"
+        send_email_with_attachment(
+            subject=f"Invoice {invoice.invoice_number} from Nieuwburg Blitz",
+            recipients=[recipient_email],
+            html_body=email_html,
+            attachment_data=pdf_data,
+            attachment_filename=filename,
+            attachment_mimetype='application/pdf'
+        )
+
+        log_activity('Invoice Sent', f"Admin sent Invoice {invoice.invoice_number} to {recipient_email}")
+
+        return jsonify({"message": f"Invoice sent successfully to {recipient_email}"}), 200
+
     except Exception as e:
-        db.session.rollback()
-        print(f"Error creating booking request: {e}")
-        return jsonify({'status': 'error', 'message': 'Could not process your booking request.'}), 500
+        print(f"Error sending invoice: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"Error sending email: {str(e)}"}), 500
 
-
-@bp.route('/initialize-payment', methods=['POST'])
-def initialize_payment():
-    # ... (initialize_payment implementation) ...
-    import os # Added for clarity
-    
-    try:
-        data = request.json
-        payload = {
-            "email": data.get('email'),
-            "amount": int(float(data.get('totalPrice')) * 100),
-            "currency": "ZAR",
-            "metadata": {"booking_details": data}
-        }
-        headers = {
-            "Authorization": f"Bearer {os.environ.get('PAYSTACK_SECRET_KEY')}",
-            "Content-Type": "application/json"
-        }
-        response = requests.post("https://api.paystack.co/transaction/initialize", headers=headers, json=payload)
-        response.raise_for_status()
-        response_data = response.json()
-        if response_data.get('status'):
-            return jsonify(response_data['data'])
-        else:
-            return jsonify({'error': 'Could not initialize payment with provider.'}), 400
-    except Exception as e:
-        return jsonify({'error': f'An internal server error occurred: {e}'}), 500
-    
 @bp.route('/admin/clients/<int:user_id>', methods=['GET'])
 @login_required
 def get_client_details(user_id):
@@ -2075,15 +2125,16 @@ def get_client_details(user_id):
         return jsonify({"message": "Permission denied"}), 403
 
     try:
-        # Fetch client with their profile data efficiently
+        # TENANT AWARE
         client = User.query.options(joinedload(User.profile)).filter(
-            User.id == user_id, User.role == 'client'
+            User.id == user_id, 
+            User.role == 'client',
+            User.tenant_id == current_user.tenant_id
         ).first()
 
         if not client:
             return jsonify({"message": "Client not found"}), 404
 
-        # Prepare profile data, handling potential None values
         profile_data = {}
         if client.profile:
             profile_data = {
@@ -2091,18 +2142,16 @@ def get_client_details(user_id):
                 "phone_number": client.profile.phone_number or 'N/A',
                 "address": client.profile.address or 'N/A',
                 "service_frequency": client.profile.service_frequency or 'N/A',
-                "service_fee": client.profile.service_fee, # Keep as number or None
-                "notes": client.profile.notes or '' # Default to empty string
+                "service_fee": client.profile.service_fee, 
+                "notes": client.profile.notes or '' 
             }
-        else: # Handle case where profile might somehow be missing
+        else: 
              profile_data = {
                 "full_name": 'N/A', "phone_number": 'N/A', "address": 'N/A',
                 "service_frequency": 'N/A', "service_fee": None, "notes": ''
              }
 
 
-        # Optional: Fetch related data like booking history (simplified example)
-        # You might want more details or pagination for a large history
         bookings = QuoteRequest.query.filter_by(user_id=client.id).order_by(QuoteRequest.request_date.desc()).limit(10).all()
         booking_history = [{
             "id": b.id,
@@ -2110,14 +2159,14 @@ def get_client_details(user_id):
             "primary_service": b.primary_service or 'N/A',
             "status": b.status or 'Unknown',
             "property_type": b.property_type or 'N/A',
-            "service_frequency": b.service_frequency or 'N/A' # Different from profile frequency
+            "service_frequency": b.service_frequency or 'N/A' 
         } for b in bookings]
 
         client_data = {
             "id": client.id,
             "email": client.email,
             "profile": profile_data,
-            "booking_history": booking_history # Add booking history
+            "booking_history": booking_history 
         }
         return jsonify(client_data)
 
@@ -2128,12 +2177,15 @@ def get_client_details(user_id):
 @bp.route('/admin/clients/search')
 @login_required
 def search_clients():
-    # ... (search_clients implementation) ...
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"error": "Permission denied"}), 403
 
     query = request.args.get('q', '').strip().lower()
-    clients_query = User.query.outerjoin(User.profile).filter(User.role == 'client')
+    # TENANT AWARE
+    clients_query = User.query.outerjoin(User.profile).filter(
+        User.role == 'client',
+        User.tenant_id == current_user.tenant_id
+    )
 
     if query:
         search_term = f"%{query}%"
@@ -2156,7 +2208,6 @@ def search_clients():
             "email": client.email,
             "phone_number": phone_number,
             "address": address,
-            #"view_url": url_for('admin.view_client', user_id=client.id)
         })
     return jsonify(clients_data)
 
@@ -2167,7 +2218,11 @@ def search_staff():
         return jsonify({"error": "Permission denied"}), 403
 
     query = request.args.get('q', '').strip().lower()
-    staff_query = User.query.outerjoin(User.profile).filter(User.role == 'staff')
+    # TENANT AWARE
+    staff_query = User.query.outerjoin(User.profile).filter(
+        User.role == 'staff',
+        User.tenant_id == current_user.tenant_id
+    )
 
     if query:
         search_term = f"%{query}%"
@@ -2194,7 +2249,6 @@ def search_staff():
             "phone_number": staff.profile.phone_number if staff.profile else 'N/A',
             "profile_image": staff.profile.profile_image if staff.profile else None,
             "age": age,
-            #"view_url": url_for('admin.view_staff', user_id=staff.id)
         })
 
     return jsonify(staff_data)
@@ -2206,34 +2260,37 @@ def get_staff_applications():
         return jsonify({"message": "Permission denied"}), 403
 
     try:
+        # NOTE: Applications are currently global (public form).
+        # In future, you might want these to be tenant-specific if the form is on a tenant's subdomain.
         applications = StaffApplication.query.order_by(StaffApplication.submission_date.desc()).all()
         apps_data = []
         for app in applications:
             apps_data.append({
                 "id": app.id,
-                "submission_date": app.submission_date.strftime('%d %b %Y, %H:%M') if app.submission_date else 'N/A', # Format date
+                "submission_date": app.submission_date.strftime('%d %b %Y, %H:%M') if app.submission_date else 'N/A', 
                 "full_name": app.full_name,
                 "id_number": app.id_number or 'N/A',
                 "email": app.email,
                 "phone_number": app.phone_number,
-                "document_filenames": app.document_filenames or [] # Return list or empty list
+                "document_filenames": app.document_filenames or [] 
             })
         return jsonify(apps_data)
     except Exception as e:
         print(f"Error fetching staff applications: {e}")
         return jsonify({"message": "Error fetching application data."}), 500
     
-@bp.route('/admin/blog/posts', methods=['GET']) # Changed URL to match React
+@bp.route('/admin/blog/posts', methods=['GET']) 
 @login_required
 def get_admin_blog_posts():
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
 
     try:
-        # Fetch all posts, ordered by creation date
-        # Eagerly load author and profile for efficiency
+        # TENANT AWARE
         posts = Post.query.options(
             joinedload(Post.author).joinedload(User.profile)
+        ).filter_by(
+            tenant_id=current_user.tenant_id
         ).order_by(Post.created_date.desc()).all()
 
         posts_data = []
@@ -2242,9 +2299,8 @@ def get_admin_blog_posts():
                 "id": post.id,
                 "title": post.title,
                 "author_name": post.author.profile.full_name if post.author and post.author.profile else post.author.email if post.author else 'System',
-                "date_posted": post.created_date.isoformat() if post.created_date else None, # Send ISO format for easier JS parsing
+                "date_posted": post.created_date.isoformat() if post.created_date else None, 
                 "is_published": post.is_published
-                # Add excerpt or other fields if needed by the frontend later
             })
         return jsonify(posts_data)
     except Exception as e:
@@ -2257,7 +2313,10 @@ def get_service_clauses():
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
     
-    clauses = ServiceClause.query.order_by(ServiceClause.name).all()
+    # TENANT AWARE
+    clauses = ServiceClause.query.filter_by(
+        tenant_id=current_user.tenant_id
+    ).order_by(ServiceClause.name).all()
     return jsonify([c.to_dict() for c in clauses])
 
 @bp.route('/admin/service-clauses', methods=['POST'])
@@ -2273,7 +2332,8 @@ def create_service_clause():
     try:
         new_clause = ServiceClause(
             name=data['name'],
-            text=data['text']
+            text=data['text'],
+            tenant_id=current_user.tenant_id # <--- TENANT AWARE
         )
         db.session.add(new_clause)
         db.session.commit()
@@ -2290,7 +2350,12 @@ def update_service_clause(clause_id):
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
         
-    clause = db.session.get(ServiceClause, clause_id)
+    # TENANT AWARE
+    clause = ServiceClause.query.filter_by(
+        id=clause_id,
+        tenant_id=current_user.tenant_id
+    ).first()
+
     if not clause:
         return jsonify({"message": "Clause not found"}), 404
         
@@ -2315,7 +2380,12 @@ def delete_service_clause(clause_id):
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
         
-    clause = db.session.get(ServiceClause, clause_id)
+    # TENANT AWARE
+    clause = ServiceClause.query.filter_by(
+        id=clause_id,
+        tenant_id=current_user.tenant_id
+    ).first()
+
     if not clause:
         return jsonify({"message": "Clause not found"}), 404
         
@@ -2328,3 +2398,167 @@ def delete_service_clause(clause_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": f"An error occurred: {str(e)}"}), 500
+
+# Plan prices in CENTS (R499.00 = 49900)
+PLAN_PRICES = {
+    'basic': 49900,
+    'intermediate': 89900,
+    'pro': 129900
+}
+
+@bp.route('/subscription/initiate', methods=['POST'])
+def initiate_subscription():
+    data = request.json
+    
+    email = data.get('email')
+    full_name = data.get('full_name')
+    business_name = data.get('business_name')
+    plan_type = data.get('plan_type')
+    password = data.get('password')
+
+    # 1. RECEIVE DATA & VALIDATE
+    if not all([email, full_name, business_name, plan_type, password]):
+        return jsonify({'message': 'Missing required fields'}), 400
+
+    if plan_type not in PLAN_PRICES:
+        return jsonify({'message': 'Invalid plan type'}), 400
+
+    # 2. VALIDATE: Check if user already exists
+    existing_user = User.query.filter_by(email=email).first()
+    if existing_user:
+        return jsonify({'message': 'An account with this email already exists.'}), 409 
+
+    amount_in_cents = PLAN_PRICES[plan_type]
+    
+    # 4. GENERATE REFERENCE
+    paystack_ref = str(uuid.uuid4())
+
+    try:
+        # 3. CREATE (INACTIVE) RECORDS
+        
+        new_tenant = Tenant(
+            business_name=business_name,
+            subscription_plan=plan_type,
+            paystack_reference=paystack_ref,
+            is_active=False 
+        )
+        db.session.add(new_tenant)
+        db.session.flush() 
+
+        new_user = User(
+            email=email,
+            role='admin', 
+            is_confirmed=False, 
+            tenant_id=new_tenant.id 
+        )
+        new_user.set_password(password)
+        db.session.add(new_user)
+        db.session.flush() 
+
+        new_profile = Profile(
+            user_id=new_user.id,
+            full_name=full_name,
+            tenant_id=new_tenant.id 
+        )
+        db.session.add(new_profile)
+        
+        new_settings = BusinessSettings(
+            tenant_id=new_tenant.id,
+            business_name=business_name 
+        )
+        db.session.add(new_settings)
+
+        # 5. CALL PAYSTACK
+        paystack_url = "https://api.paystack.co/transaction/initialize"
+        paystack_secret = os.environ.get('PAYSTACK_SECRET_KEY')
+
+        if not paystack_secret:
+            raise Exception("PAYSTACK_SECRET_KEY is not set.")
+
+        headers = {
+            "Authorization": f"Bearer {paystack_secret}",
+            "Content-Type": "application/json"
+        }
+        
+        callback_url = url_for('main.payment_callback', _external=True)
+
+        payload = {
+            "email": email,
+            "amount": amount_in_cents,
+            "reference": paystack_ref,
+            "callback_url": callback_url,
+            "metadata": {
+                "full_name": full_name,
+                "business_name": business_name,
+                "plan_type": plan_type,
+                "user_id": new_user.id, 
+                "tenant_id": new_tenant.id 
+            }
+        }
+
+        response = requests.post(paystack_url, headers=headers, json=payload)
+        response.raise_for_status() 
+        
+        response_data = response.json()
+
+        if response_data.get('status'):
+            db.session.commit()
+            
+            return jsonify({
+                'message': 'Payment initiated successfully',
+                'authorization_url': response_data['data']['authorization_url']
+            }), 200
+        else:
+            raise Exception(f"Paystack error: {response_data.get('message')}")
+
+    except requests.exceptions.RequestException as e:
+        db.session.rollback() 
+        print(f"Paystack API Error: {e}")
+        traceback.print_exc()
+        return jsonify({'message': f'Error contacting payment provider: {e}'}), 500
+    except Exception as e:
+        db.session.rollback() 
+        print(f"Error in /subscription/initiate: {e}")
+        traceback.print_exc()
+        return jsonify({'message': f'An internal server error occurred: {str(e)}'}), 500
+    
+@bp.route('/admin/setup-wizard/save', methods=['POST'])
+@login_required
+@admin_required
+def save_setup_wizard():
+    """
+    Saves the data from the new tenant setup wizard.
+    """
+    data = request.json
+    if not data:
+        return jsonify({"message": "No data provided"}), 400
+
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        return jsonify({"message": "Invalid user: No tenant associated."}), 403
+
+    try:
+        # TENANT AWARE
+        settings = BusinessSettings.query.filter_by(tenant_id=tenant_id).first()
+        
+        if not settings:
+            settings = BusinessSettings(tenant_id=tenant_id)
+            db.session.add(settings)
+
+        settings.business_name = data.get('business_name', settings.business_name)
+        settings.business_address = data.get('business_address', settings.business_address)
+        settings.registration_number = data.get('registration_number', settings.registration_number)
+        settings.default_terms = data.get('default_terms', settings.default_terms)
+
+        db.session.commit()
+
+        return jsonify({
+            "message": "Setup complete! Redirecting to your dashboard...",
+            "redirect_url": url_for('admin.admin_spa_shell', path='dashboard') 
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error saving setup wizard data for tenant {tenant_id}: {e}")
+        traceback.print_exc()
+        return jsonify({"message": f"An internal error occurred: {str(e)}"}), 500

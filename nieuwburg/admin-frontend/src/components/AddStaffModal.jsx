@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { BarLoader } from 'react-spinners';
 
-// Reusable Input Field component (can reuse from AddClientModal or define here)
+// Re-usable Input Field component
 const InputField = ({ label, id, name, type = 'text', value, onChange, required = false, ...props }) => (
   <div className="form-group">
     <label htmlFor={id}>{label}</label>
@@ -17,7 +18,7 @@ const InputField = ({ label, id, name, type = 'text', value, onChange, required 
   </div>
 );
 
-// Reusable TextArea Field component (can reuse or define here)
+// Re-usable TextArea Field component
 const TextAreaField = ({ label, id, name, value, onChange, required = false, rows = 3, ...props }) => (
     <div className="form-group">
         <label htmlFor={id}>{label}</label>
@@ -42,33 +43,31 @@ function AddStaffModal({ isOpen, onClose, onStaffAdded }) {
     phone_number: '',
     address: '',
     id_number: '',
-    send_activation_email: true, // Default to checked
+    send_activation_email: true
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [csrfToken, setCsrfToken] = useState('');
 
-  // Get CSRF token
+  // Combined useEffect to manage modal state
   useEffect(() => {
-    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-    if (token) {
+    if (isOpen) {
+      const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+      if (token) {
         setCsrfToken(token);
-    } else {
-        console.error("CSRF token not found!");
+      } else {
+        console.error("CSRF token not found in meta tag!");
         setError("Configuration error: CSRF token missing.");
-    }
-  }, [isOpen]);
-
-  // Reset form when modal opens or closes
-  useEffect(() => {
-    if (!isOpen) {
+      }
+      setError(null);
+    } else {
       setFormData({
         full_name: '',
         email: '',
         phone_number: '',
         address: '',
         id_number: '',
-        send_activation_email: true, // Reset checkbox state
+        send_activation_email: true
       });
       setError(null);
       setIsSubmitting(false);
@@ -89,37 +88,36 @@ function AddStaffModal({ isOpen, onClose, onStaffAdded }) {
     setIsSubmitting(true);
 
     if (!csrfToken) {
-        setError("Cannot submit form: CSRF token is missing.");
-        setIsSubmitting(false);
-        return;
+      setError("Cannot submit form: CSRF token is missing.");
+      setIsSubmitting(false);
+      return;
     }
 
-    // Ensure id_number is null if empty, or enforce length validation client-side if needed
-    const dataToSend = { ...formData };
-    if (!dataToSend.id_number) {
-        dataToSend.id_number = null; // Send null if empty
-    }
+    const dataToSend = {
+      ...formData,
+      csrf_token: csrfToken
+    };
 
     try {
-      const response = await fetch('/api/admin/staff', { // API endpoint from api.py
+      const response = await fetch('/api/admin/staff', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-CSRFToken': csrfToken,
         },
-        body: JSON.stringify(dataToSend), // Send processed data
+        body: JSON.stringify(dataToSend),
       });
 
       const result = await response.json();
 
       if (response.ok) {
-        onStaffAdded(result.message || 'Staff member added successfully!'); // Call parent callback
-        onClose(); // Close the modal
+        onStaffAdded(result.message || 'Staff member added successfully!');
+        onClose();
       } else {
         setError(result.message || 'An error occurred.');
       }
     } catch (err) {
-      console.error('Error submitting staff form:', err);
+      console.error('Error submitting form:', err);
       setError('A network error occurred. Please try again.');
     } finally {
       setIsSubmitting(false);
@@ -130,7 +128,6 @@ function AddStaffModal({ isOpen, onClose, onStaffAdded }) {
     return null;
   }
 
-  // Use class names similar to the original modal
   return (
     <div id="add-staff-modal" className="modal-overlay simple-modal" style={{ display: 'flex' }}>
       <div className="modal-content auth-modal-content" style={{ maxWidth: '500px' }}>
@@ -146,74 +143,73 @@ function AddStaffModal({ isOpen, onClose, onStaffAdded }) {
         <h2 className="auth-title">Add New Staff Member</h2>
 
         {error && (
-          <div id="add-staff-error-message" className="flash error" style={{ marginTop: 0 }}>
+          <div id="add-staff-error-message" className="flash error" style={{ marginTop: 0, marginBottom: '15px' }}>
             {error}
           </div>
         )}
 
-        <form id="add-staff-form" className="auth-form-modal active" style={{ paddingTop: '15px' }} onSubmit={handleSubmit}>
-
+        <form id="add-staff-form" className="auth-form-modal active" style={{ paddingTop: '15px', gap: '15px' }} onSubmit={handleSubmit}>
+          
           <InputField
             label="Full Name"
-            id="add-staff-full_name"
-            name="full_name"
+            id="add-staff-full_name" name="full_name" type="text"
             value={formData.full_name}
             onChange={handleChange}
             required
           />
           <InputField
             label="Email"
-            id="add-staff-email"
-            name="email"
-            type="email"
+            id="add-staff-email" name="email" type="email"
             value={formData.email}
             onChange={handleChange}
             required
           />
           <InputField
             label="Phone Number"
-            id="add-staff-phone_number"
-            name="phone_number"
-            type="tel"
+            id="add-staff-phone_number" name="phone_number" type="tel"
             value={formData.phone_number}
             onChange={handleChange}
           />
+          <InputField
+            label="ID Number (Optional)"
+            id="add-staff-id_number" name="id_number" type="text"
+            value={formData.id_number}
+            onChange={handleChange}
+          />
           <TextAreaField
-            label="Address"
-            id="add-staff-address"
-            name="address"
+            label="Address (Optional)"
+            id="add-staff-address" name="address"
             value={formData.address}
             onChange={handleChange}
             rows={3}
           />
-          <InputField
-            label="South African ID Number"
-            id="add-staff-id_number"
-            name="id_number"
-            value={formData.id_number}
-            onChange={handleChange}
-            maxLength={13} // HTML5 validation
-            // Add pattern="\d{13}" for stricter validation if desired
-          />
-
-          {/* Send Activation Email Checkbox - matches style/structure from Flask template */}
-          <div className="form-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '10px', backgroundColor: '#f4f7fa', padding: '10px', borderRadius: '8px' }}>
-            <input
+          
+          {/* === THIS IS THE FIX === */}
+          {/* We wrap the checkbox in a form-group and use flexbox for alignment */}
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
                 type="checkbox"
-                id="send_activation_email"
+                id="add-staff-send_activation_email"
                 name="send_activation_email"
                 checked={formData.send_activation_email}
                 onChange={handleChange}
-                style={{ width: '20px', height: '20px' }}
-            />
-            <label htmlFor="send_activation_email" style={{ fontWeight: 'bold', marginBottom: 0 }}>
-                Send activation email to staff member
-            </label>
+                style={{ width: 'auto', height: 'auto', margin: 0 }} // Reset default input styles
+              />
+              <label 
+                htmlFor="add-staff-send_activation_email" 
+                style={{ marginBottom: 0, fontWeight: 'normal', fontSize: '0.9rem', cursor: 'pointer' }}
+              >
+                Send account activation email
+              </label>
+            </div>
           </div>
+          {/* === END OF FIX === */}
 
-          <button type="submit" className="cta" disabled={isSubmitting}>
-            {isSubmitting ? 'Saving...' : 'Save Staff Member'}
+          <button type="submit" className="cta" disabled={isSubmitting} style={{marginTop: '10px'}}>
+            {isSubmitting ? 'Saving...' : 'Save Staff'}
           </button>
+
         </form>
       </div>
     </div>

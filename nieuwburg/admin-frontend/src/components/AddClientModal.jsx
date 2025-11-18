@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-// Reusable Input Field component (optional, but good practice)
+// Reusable Input Field component
 const InputField = ({ label, id, name, type = 'text', value, onChange, required = false, ...props }) => (
   <div className="form-group">
     <label htmlFor={id}>{label}</label>
@@ -10,14 +10,14 @@ const InputField = ({ label, id, name, type = 'text', value, onChange, required 
       name={name}
       value={value}
       onChange={onChange}
-      className="form-control"
+      className="form-control" // Using the class from your file
       required={required}
       {...props}
     />
   </div>
 );
 
-// Reusable TextArea Field component (optional)
+// Reusable TextArea Field component
 const TextAreaField = ({ label, id, name, value, onChange, required = false, rows = 3, ...props }) => (
     <div className="form-group">
         <label htmlFor={id}>{label}</label>
@@ -26,7 +26,7 @@ const TextAreaField = ({ label, id, name, value, onChange, required = false, row
             name={name}
             value={value}
             onChange={onChange}
-            className="form-control"
+            className="form-control" // Using the class from your file
             required={required}
             rows={rows}
             {...props}
@@ -46,20 +46,20 @@ function AddClientModal({ isOpen, onClose, onClientAdded }) {
   const [error, setError] = useState(null);
   const [csrfToken, setCsrfToken] = useState('');
 
-  // Get CSRF token when component mounts (or modal opens)
+  // We will combine the two useEffects into one for robustness
   useEffect(() => {
-    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-    if (token) {
+    if (isOpen) {
+      // --- MODAL IS OPENING ---
+      const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+      if (token) {
         setCsrfToken(token);
-    } else {
+      } else {
         console.error("CSRF token not found in meta tag!");
         setError("Configuration error: CSRF token missing.");
-    }
-  }, [isOpen]); // Re-check if modal re-opens, though it shouldn't change
-
-  // Reset form when modal opens or closes
-  useEffect(() => {
-    if (!isOpen) {
+      }
+      setError(null); // Clear previous errors
+    } else {
+      // --- MODAL IS CLOSING ---
       setFormData({
         full_name: '',
         email: '',
@@ -90,14 +90,23 @@ function AddClientModal({ isOpen, onClose, onClientAdded }) {
         return;
     }
 
+    // === THIS IS THE FIX ===
+    // We must add the csrf_token to the JSON body
+    // for the Flask-WTF form to validate.
+    const dataToSend = {
+        ...formData,
+        csrf_token: csrfToken 
+    };
+    // === END OF FIX ===
+
     try {
       const response = await fetch('/api/admin/clients', { // API endpoint from api.py
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRFToken': csrfToken, // Include CSRF token
+          'X-CSRFToken': csrfToken, // It's good to keep this header too
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(dataToSend), // <-- Send the data *with* the token
       });
 
       const result = await response.json();
@@ -136,14 +145,13 @@ function AddClientModal({ isOpen, onClose, onClientAdded }) {
         <h2 className="auth-title">Add New Client</h2>
 
         {error && (
-          <div id="add-client-error-message" className="flash error" style={{ marginTop: 0 }}>
+          <div id="add-client-error-message" className="flash error" style={{ marginTop: 0, marginBottom: '15px' }}>
             {error}
           </div>
         )}
 
-        <form id="add-client-form" className="auth-form-modal active" style={{ paddingTop: '15px' }} onSubmit={handleSubmit}>
-          {/* CSRF token is sent via header, no hidden input needed unless preferred */}
-          {/* <input type="hidden" name="csrf_token" value={csrfToken} /> */}
+        <form id="add-client-form" className="auth-form-modal active" style={{ paddingTop: '15px', gap: '15px' }} onSubmit={handleSubmit}>
+          {/* We now add the token to the body, so no hidden input is needed */}
 
           <InputField
             label="Full Name"
@@ -179,10 +187,23 @@ function AddClientModal({ isOpen, onClose, onClientAdded }) {
             rows={3}
           />
 
-          <button type="submit" className="cta" disabled={isSubmitting}>
-            {isSubmitting ? 'Saving...' : 'Save Client'}
-          </button>
+          {/* Moved buttons to a modal-footer for consistency */}
         </form>
+        
+        <div className="modal-footer" style={{marginTop: '20px', paddingTop: '20px', borderTop: '1px solid var(--border-color)'}}>
+            <button type="button" className="cta-outline" onClick={onClose} disabled={isSubmitting}>
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              className="cta" 
+              form="add-client-form" 
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Client'}
+            </button>
+        </div>
+        
       </div>
     </div>
   );

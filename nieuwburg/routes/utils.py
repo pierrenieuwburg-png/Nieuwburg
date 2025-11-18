@@ -49,28 +49,36 @@ def log_activity(activity_type, description, user_id=None):
     db.session.commit()
 
 def get_next_quote_number():
-    """Generates the next sequential quote number."""
-    last_quote = Quote.query.order_by(Quote.id.desc()).first()
+    """Generates the next sequential quote number for the CURRENT TENANT."""
+    # TENANT AWARE: Filter by the current user's tenant
+    last_quote = Quote.query.filter_by(
+        tenant_id=current_user.tenant_id
+    ).order_by(Quote.id.desc()).first()
+
     if not last_quote or '-' not in last_quote.quote_number:
-        return "QU-0051"
+        return "QU-0001" # Start fresh for every new tenant
     try:
         last_num = int(last_quote.quote_number.split('-')[1])
         new_num = last_num + 1
         return f"QU-{new_num:04d}"
     except (IndexError, ValueError):
-        return "QU-0051"
+        return "QU-0001"
 
 def get_next_invoice_number():
-    """Generates the next sequential invoice number."""
-    last_invoice = Invoice.query.order_by(Invoice.id.desc()).first()
+    """Generates the next sequential invoice number for the CURRENT TENANT."""
+    # TENANT AWARE: Filter by the current user's tenant
+    last_invoice = Invoice.query.filter_by(
+        tenant_id=current_user.tenant_id
+    ).order_by(Invoice.id.desc()).first()
+
     if not last_invoice or '-' not in last_invoice.invoice_number:
-        return "INV-0061"
+        return "INV-0001" # Start fresh for every new tenant
     try:
         last_num = int(last_invoice.invoice_number.split('-')[1])
         new_num = last_num + 1
         return f"INV-{new_num:04d}"
     except (IndexError, ValueError):
-        return "INV-0061"
+        return "INV-0001"
 
 def create_invoice_from_job(job):
     """Creates an invoice from a completed job's quote request."""

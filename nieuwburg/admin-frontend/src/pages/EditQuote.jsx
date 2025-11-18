@@ -2,51 +2,71 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { BarLoader } from 'react-spinners';
 
-// --- Re-usable Line Item Component ---
-// *** MODIFIED: The 'description' input is now a textarea ***
-const LineItem = ({ item, index, onChange, onRemove }) => {
+// --- "SMART" LINE ITEM COMPONENT ---
+const LineItem = ({ item, index, onServiceSelect, onManualChange, onRemove, allServices }) => {
   const amount = (item.quantity || 0) * (item.unit_price || 0);
+
+  const handleServiceChange = (e) => {
+    const serviceId = parseInt(e.target.value, 10);
+    if (serviceId) {
+      const service = allServices.find(s => s.id === serviceId);
+      if (service) {
+        onServiceSelect(index, service);
+      }
+    } else {
+      onServiceSelect(index, null); // User selected "Custom Item"
+    }
+  };
+
   return (
-    <div className="line-item-row">
-      <textarea
-        placeholder="Description"
-        value={item.description || ''}
-        onChange={(e) => onChange(index, 'description', e.target.value)}
-        className="form-input" // We will style this new textarea
-        rows={3} // Start with 3 rows
-        style={{flex: 1, marginRight: '10px', resize: 'vertical'}}
-      />
-      <div className="line-item-inputs">
-        <input
-          type="number"
-          placeholder="Qty"
-          value={item.quantity || 0}
-          onChange={(e) => onChange(index, 'quantity', e.target.value)}
+    <div className="line-item-row-smart">
+      <div className="line-item-select">
+        <select
           className="form-input"
-          style={{width: '80px', marginRight: '10px'}}
-        />
-        <input
-          type="number"
-          placeholder="Unit Price"
-          value={item.unit_price || 0}
-          onChange={(e) => onChange(index, 'unit_price', e.target.value)}
+          value={item.service_item_id || ""}
+          onChange={handleServiceChange}
+        >
+          <option value="">-- Select a Service or Custom --</option>
+          {allServices.map(service => (
+            <option key={service.id} value={service.id}>
+              {service.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="line-item-details">
+        <textarea
+          placeholder="Description"
+          value={item.description || ''}
+          onChange={(e) => onManualChange(index, 'description', e.target.value)}
           className="form-input"
-          style={{width: '120px', marginRight: '10px'}}
+          rows={3}
         />
-        <input
-          type="text"
-          readOnly
-          value={`R ${isNaN(amount) ? '0.00' : amount.toFixed(2)}`}
-          className="form-input"
-          style={{width: '120px', marginRight: '10px', background: '#f9fafb'}}
-        />
-        <button type="button" onClick={() => onRemove(index)} className="cta-danger-outline" style={{padding: '10px 15px'}}>X</button>
+        <div className="line-item-inputs">
+          <input
+            type="number" placeholder="Qty" value={item.quantity || 1}
+            onChange={(e) => onManualChange(index, 'quantity', e.target.value)}
+            className="form-input"
+          />
+          <input
+            type="number" placeholder="Unit Price" value={item.unit_price || 0}
+            onChange={(e) => onManualChange(index, 'unit_price', e.target.value)}
+            className="form-input"
+          />
+          <input
+            type="text" readOnly value={`R ${isNaN(amount) ? '0.00' : amount.toFixed(2)}`}
+            className="form-input"
+          />
+          <button type="button" onClick={() => onRemove(index)} className="cta-danger-outline">X</button>
+        </div>
       </div>
     </div>
   );
 };
 
 
+// --- MAIN EDIT QUOTE PAGE ---
 function EditQuote() {
   const navigate = useNavigate();
   const { quoteId } = useParams();
@@ -57,23 +77,31 @@ function EditQuote() {
   const [guestEmail, setGuestEmail] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
   const [guestAddress, setGuestAddress] = useState('');
-  const [lineItems, setLineItems] =useState([
-    { description: '', quantity: 1, unit_price: 0 }
+  const [lineItems, setLineItems] = useState([
+    { service_item_id: null, description: '', quantity: 1, unit_price: 0 }
   ]);
   const [discount, setDiscount] = useState(0);
 
-  // *** NEW: State for locked business settings ***
-  const [businessSettings, setBusinessSettings] = useState(null);
-
+  // Business info state
+  const [isLocked, setIsLocked] = useState(true); // Locked by default
+  const [termsAndConditions, setTermsAndConditions] = useState('');
+  const [businessAddress, setBusinessAddress] = useState('');
+  const [registrationNumber, setRegistrationNumber] = useState('');
+  
+  // Loaded data state
+  const [allServices, setAllServices] = useState([]);
+  const [allClauses, setAllClauses] = useState([]);
+  const [businessSettings, setBusinessSettings] = useState(null); // Defaults
+  
   // System state
   const [csrfToken, setCsrfToken] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false); // <-- Use this for submit button
   const [error, setError] = useState(null);
-  const [originalStatus, setOriginalStatus] = useState("");
 
-  // --- MODIFIED: Data Fetching ---
+  // --- 1. Data Fetching ---
   useEffect(() => {
-    const fetchQuoteData = async () => {
+    const fetchData = async () => {
       setIsLoading(true);
       setError(null);
       
@@ -81,41 +109,55 @@ function EditQuote() {
       setCsrfToken(token || "");
 
       try {
-        // --- Fetch both quote and settings data in parallel ---
-        const [quoteRes, settingsRes] = await Promise.all([
+        // --- Fetch all 4 data sources in parallel ---
+        const [quoteRes, servicesRes, settingsRes, clausesRes] = await Promise.all([
           fetch(`/api/admin/quotes/formal/${quoteId}`),
-          fetch('/api/admin/business-settings') // New fetch call
+          fetch('/api/admin/all-services'),
+          fetch('/api/admin/business-settings'),
+          fetch('/api/admin/service-clauses')
         ]);
 
-        if (!quoteRes.ok) {
-          throw new Error(`Failed to load quote (Status: ${quoteRes.status})`);
-        }
-        if (!settingsRes.ok) {
-          throw new Error(`Failed to load business settings (Status: ${settingsRes.status})`);
-        }
-
-        const data = await quoteRes.json();
-        const settingsData = await settingsRes.json(); // New settings data
+        if (!quoteRes.ok) throw new Error('Failed to load quote');
+        if (!servicesRes.ok) throw new Error('Failed to load services list');
+        if (!settingsRes.ok) throw new Error('Failed to load business settings');
+        if (!clausesRes.ok) throw new Error('Failed to load T&C clauses');
         
-        // Check if quote is editable
-        if (data.quote.status !== 'Draft') {
-          setError(`This quote is "${data.quote.status}" and can no longer be edited.`);
+        const quoteData = await quoteRes.json();
+        const servicesData = await servicesRes.json();
+        const settingsData = await settingsRes.json();
+        const clausesData = await clausesRes.json();
+        
+        if (quoteData.quote.status !== 'Draft') {
+          setError(`This quote is "${quoteData.quote.status}" and can no longer be edited.`);
           setIsLoading(false);
           return;
         }
 
-        // --- Pre-populate state ---
-        setClientId(data.client.user_id || null);
-        setGuestName(data.client.name || '');
-        setGuestEmail(data.client.email || '');
-        setGuestPhone(data.client.phone || '');
-        setGuestAddress(data.client.address || '');
-        setLineItems(data.line_items.length > 0 ? data.line_items : [{ description: '', quantity: 1, unit_price: 0 }]);
-        setDiscount(data.quote.discount || 0);
-        setOriginalStatus(data.quote.status);
-        
-        // --- Set new settings state ---
+        // --- Populate state ---
+        setAllServices(servicesData);
+        setAllClauses(clausesData);
         setBusinessSettings(settingsData);
+        
+        // Populate client info
+        setClientId(quoteData.client.user_id || null);
+        setGuestName(quoteData.client.name || '');
+        setGuestEmail(quoteData.client.email || '');
+        setGuestPhone(quoteData.client.phone || '');
+        setGuestAddress(quoteData.client.address || '');
+        
+        // Populate line items
+        setLineItems(quoteData.quote.line_items && quoteData.quote.line_items.length > 0 ? quoteData.quote.line_items : [{ service_item_id: null, description: '', quantity: 1, unit_price: 0 }]);
+        setDiscount(quoteData.quote.discount || 0);
+        
+        // --- Populate business info (Use saved quote data first, fallback to global settings) ---
+        setBusinessAddress(quoteData.quote.business_address || settingsData.business_address);
+        setRegistrationNumber(quoteData.quote.registration_number || settingsData.registration_number);
+        
+        // If T&Cs were saved on the quote, use them.
+        // Otherwise, they will be auto-assembled by the next useEffect.
+        if (quoteData.quote.terms_and_conditions) {
+          setTermsAndConditions(quoteData.quote.terms_and_conditions);
+        }
 
       } catch (err) {
         console.error("Error fetching data:", err);
@@ -124,38 +166,102 @@ function EditQuote() {
         setIsLoading(false);
       }
     };
-
-    fetchQuoteData();
+    fetchData();
   }, [quoteId]);
 
-  // --- Line Item Handlers (no change) ---
-  const handleLineItemChange = (index, field, value) => {
+  // --- 2. "Smart T&C" Auto-Assembly Logic ---
+  useEffect(() => {
+    // Only auto-assemble if the section is locked AND all data is loaded
+    if (isLocked && businessSettings && allServices && allServices.length > 0 && allClauses && allClauses.length > 0) {
+      
+      // 1. Get default terms
+      let newTerms = businessSettings.default_terms || "";
+      
+      // 2. Find all unique service IDs from line items
+      const serviceIdsInQuote = new Set(
+        lineItems
+          .map(item => item.service_item_id)
+          .filter(id => id != null) // Filter out null/custom items
+      );
+      
+      // 3. Find all unique clause IDs linked to those services
+      const clauseIdsToInclude = new Set();
+      allServices.forEach(service => {
+        if (serviceIdsInQuote.has(service.id)) {
+          service.linked_clause_ids.forEach(id => clauseIdsToInclude.add(id));
+        }
+      });
+      
+      // 4. Build the T&C string
+      const clausesText = allClauses
+        .filter(clause => clauseIdsToInclude.has(clause.id))
+        .map(clause => clause.text)
+        .join("\n\n"); // Join clauses with a double line break
+
+      if (clausesText) {
+        newTerms += `\n\n--- Additional Terms ---\n${clausesText}`;
+      }
+      
+      setTermsAndConditions(newTerms);
+    }
+    // This dependency array is key: it re-runs this logic
+    // every time the line items change *while the panel is locked*.
+  }, [isLocked, lineItems, allServices, allClauses, businessSettings]);
+
+
+  // --- 3. Line Item Handlers ---
+  const handleServiceSelect = (index, service) => {
     const updatedItems = [...lineItems];
-    updatedItems[index][field] = value;
+    if (service) {
+      // Auto-populate from selected service
+      updatedItems[index] = {
+        ...updatedItems[index],
+        service_item_id: service.id,
+        description: service.default_description,
+        unit_price: service.default_price,
+        quantity: 1,
+      };
+    } else {
+      // User selected "Custom", so clear the link
+      updatedItems[index] = {
+        ...updatedItems[index],
+        description: '', // Clear description
+        unit_price: 0, // Reset price
+        service_item_id: null,
+      };
+    }
+    setLineItems(updatedItems);
+  };
+
+  const handleManualChange = (index, field, value) => {
+    const updatedItems = [...lineItems];
+    updatedItems[index] = { ...updatedItems[index], [field]: value };
     setLineItems(updatedItems);
   };
 
   const addLineItem = () => {
-    setLineItems([...lineItems, { description: '', quantity: 1, unit_price: 0 }]);
+    setLineItems([...lineItems, { service_item_id: null, description: '', quantity: 1, unit_price: 0 }]);
   };
 
   const removeLineItem = (index) => {
     if (lineItems.length > 1) {
-      const updatedItems = lineItems.filter((_, i) => i !== index);
-      setLineItems(updatedItems);
+      setLineItems(lineItems.filter((_, i) => i !== index));
+    } else {
+      // If it's the last one, just reset it
+      setLineItems([{ service_item_id: null, description: '', quantity: 1, unit_price: 0 }]);
     }
   };
 
-  // --- Calculate Totals (no change) ---
+  // --- 4. Calculate Totals ---
   const subtotal = lineItems.reduce((acc, item) => {
     return acc + (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0);
   }, 0);
   const total = subtotal - (parseFloat(discount) || 0);
 
-  // --- Form Submission (no change) ---
+  // --- 5. Form Submission ---
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setIsLoading(true);
+    setIsSaving(true); // Use isSaving, not isLoading
     setError(null);
 
     const quoteData = {
@@ -164,23 +270,29 @@ function EditQuote() {
       email: guestEmail,
       phone_number: guestPhone,
       address: guestAddress,
+      
       line_items: lineItems.map(item => ({
         ...item,
+        service_item_id: item.service_item_id || null, // Ensure null is sent
         quantity: parseFloat(item.quantity) || 0,
-        unit_price: parseFloat(item.unit_price) || 0
+        unit_price: parseFloat(item.unit_price) || 0,
+        amount: (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0)
       })),
+      
       subtotal: subtotal,
       discount: parseFloat(discount) || 0,
       total: total,
+      
+      // Send the (potentially overridden) business info
+      terms_and_conditions: termsAndConditions,
+      business_address: businessAddress,
+      registration_number: registrationNumber
     };
 
     try {
       const response = await fetch(`/api/admin/quotes/${quoteId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': csrfToken
-        },
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
         body: JSON.stringify(quoteData)
       });
       const result = await response.json();
@@ -193,16 +305,15 @@ function EditQuote() {
     } catch (err) {
       console.error("Error updating quote:", err);
       setError(err.message);
-      setIsLoading(false);
+      setIsSaving(false);
     }
   };
   
-  // --- RENDER SECTION ---
   if (isLoading) {
-     return (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>
-            <BarLoader color="#006ac6" width="50%" />
-        </div>
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>
+        <BarLoader color="#006ac6" width="50%" />
+      </div>
     );
   }
 
@@ -227,11 +338,10 @@ function EditQuote() {
 
       <form onSubmit={handleSubmit} className="admin-section">
         
-        {/* Client Info Section (no change) */}
+        {/* --- Client Info Section --- */}
         <div className="admin-section" style={{background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px'}}>
           <h2>Client Information</h2>
           <div className="form-grid">
-             {/* ... form-groups for guestName, guestEmail, guestPhone, guestAddress ... */}
              <div className="form-group">
               <label htmlFor="guestName">Client Name</label>
               <input
@@ -268,30 +378,28 @@ function EditQuote() {
           </div>
         </div>
 
-        {/* --- MODIFIED: Line Items Section --- */}
+        {/* --- "Smart" Line Items Section --- */}
         <div className="admin-section" style={{marginTop: '20px'}}>
           <h2>Line Items</h2>
-          <div className="line-items-header" style={{display: 'flex', fontWeight: 'bold', marginBottom: '10px'}}>
-            <span style={{flex: 1, marginRight: '10px'}}>Description</span>
-            <span style={{width: '320px'}}>Qty / Price / Actions</span>
-          </div>
           {lineItems.map((item, index) => (
             <LineItem
-              key={item.id || index}
+              key={item.id || index} // Use item.id if it exists, fallback to index
               item={item}
               index={index}
-              onChange={handleLineItemChange}
+              allServices={allServices}
+              onServiceSelect={handleServiceSelect}
+              onManualChange={handleManualChange}
               onRemove={removeLineItem}
             />
           ))}
+          {/* === THIS IS THE SYNTAX FIX === */}
           <button type="button" onClick={addLineItem} className="cta-outline" style={{marginTop: '10px'}}>
             + Add Line Item
           </button>
         </div>
         
-        {/* Totals Section (no change) */}
+        {/* --- Totals Section --- */}
         <div className="quote-totals" style={{width: '40%', marginLeft: 'auto', marginTop: '20px'}}>
-           {/* ... totals-rows for Subtotal, Discount, and TOTAL ... */}
            <div className="totals-row">
             <span>Subtotal</span>
             <span>R {subtotal.toFixed(2)}</span>
@@ -314,26 +422,54 @@ function EditQuote() {
           </div>
         </div>
 
-        {/* --- NEW: Locked Terms Section --- */}
-        <div className="admin-section locked-settings-section" style={{marginTop: '30px'}}>
-          <h2>Terms & Conditions (Locked)</h2>
-          <p>These are your global business terms and will be automatically added to the final quote. To edit these, go to Business Settings.</p>
-          <textarea
-            className="form-input"
-            readOnly
-            disabled
-            value={businessSettings?.terms_and_conditions || 'Loading...'}
-            rows={8}
-          />
+        {/* --- "Smart" Business Info Section --- */}
+        <div className={`admin-section locked-settings-section ${isLocked ? 'is-locked' : 'is-unlocked'}`}>
+          <div className="locked-settings-header">
+            <h2>Business & Terms</h2>
+            <button type="button" onClick={() => setIsLocked(!isLocked)} className="cta-outline-small">
+              {isLocked ? 'Unlock to Edit' : 'Lock Fields'}
+            </button>
+          </div>
+          <p>This info is auto-filled from your settings. Unlock to make quote-specific changes.</p>
+          
+          <div className="form-group">
+            <label htmlFor="businessAddress">Business Address</label>
+            <input
+              id="businessAddress" type="text" className="form-input"
+              value={businessAddress}
+              onChange={(e) => setBusinessAddress(e.target.value)}
+              readOnly={isLocked}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="registrationNumber">Registration No.</label>
+            <input
+              id="registrationNumber" type="text" className="form-input"
+              value={registrationNumber}
+              onChange={(e) => setRegistrationNumber(e.target.value)}
+              readOnly={isLocked}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="termsAndConditions">Terms & Conditions</label>
+            <textarea
+              id="termsAndConditions" className="form-input"
+              value={termsAndConditions}
+              onChange={(e) => setTermsAndConditions(e.target.value)}
+              rows={10}
+              readOnly={isLocked}
+            />
+          </div>
         </div>
 
-        {/* Submission (no change) */}
+        {/* --- Submission --- */}
         <div style={{borderTop: '1px solid #e5e7eb', marginTop: '30px', paddingTop: '20px', textAlign: 'right'}}>
           <button type="button" onClick={() => navigate(`/quotes/formal/${quoteId}`)} className="cta-outline">
             Cancel
           </button>
-          <button type="submit" className="cta" disabled={isLoading} style={{marginLeft: '10px'}}>
-            {isLoading ? <BarLoader color="#fff" height={20} /> : 'Save Changes'}
+          {/* This button now checks 'isSaving' */}
+          <button type="submit" className="cta" disabled={isSaving} style={{marginLeft: '10px'}}>
+            {isSaving ? <BarLoader color="#fff" height={20} width={100} /> : 'Save Changes'}
           </button>
         </div>
       </form>

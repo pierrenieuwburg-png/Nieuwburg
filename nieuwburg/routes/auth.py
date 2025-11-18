@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 
 from .. import db, mail, oauth
-from ..models import User, Profile
+from ..models import User, Profile, Tenant
 from ..forms import LoginForm, RegistrationForm, RequestPasswordResetForm, ResetPasswordForm, ChangePasswordForm, UpdateProfileForm
 from flask_mail import Message
 
@@ -167,22 +167,48 @@ def register():
 
 @bp.route('/confirm/<token>')
 def confirm_email(token):
-    email = confirm_token(token)
+    email = confirm_token(token) # Using the local function from your file
     if not email:
         flash('The confirmation link is invalid or has expired.', 'error')
         return redirect(url_for('main.index'))
     
     user = User.query.filter_by(email=email).first_or_404()
+    
     if user.is_confirmed:
         flash('Account already confirmed. Please log in.', 'success')
     else:
+        # Activate the user
         user.is_confirmed = True
         user.confirmed_on = datetime.utcnow()
+        
+        # --- NEW LOGIC for SaaS Admins ---
+        if user.role == 'admin' and user.tenant_id:
+            tenant = Tenant.query.get(user.tenant_id)
+            if tenant:
+                tenant.is_active = True # Activate the business
+                flash(f'Welcome! Your account and business "{tenant.business_name}" are now active.', 'success')
+            else:
+                flash('Welcome! Your account is active, but we had trouble finding your business. Please contact support.', 'warning')
+        else:
+            # Original logic for regular clients
+            flash('Welcome! Your account is confirmed.', 'success')
+        # --- END NEW LOGIC ---
+            
         db.session.commit()
-        flash('Welcome! Your account is confirmed.', 'success')
     
     login_user(user)
-    return redirect(url_for('main.client_dashboard'))
+    
+    # --- NEW REDIRECT LOGIC ---
+    if user.role == 'admin' and user.tenant_id:
+        # This is the new SaaS user, send them to the setup wizard.
+        # We will create this 'admin.setup_wizard' route in the very next step.
+        return redirect(url_for('admin.admin_spa_shell', path='setup-wizard'))
+    elif user.role == 'staff':
+        # Staff go to their dashboard
+        return redirect(url_for('main.staff_dashboard'))
+    else:
+        # Existing clients go to their original dashboard
+        return redirect(url_for('main.client_dashboard'))
 
 @bp.route('/resend-confirmation/<email>')
 def resend_confirmation(email):

@@ -20,6 +20,7 @@ import CreateQuote from './pages/CreateQuote';
 import FormalQuoteDetail from './pages/FormalQuoteDetail';
 import EditQuote from './pages/EditQuote';
 import BusinessSettings from './pages/BusinessSettings';
+import SetupWizard from './pages/SetupWizard';
 
 // Placeholder for unmatched routes
 const NotFound = () => <h2>Admin Page Not Found</h2>;
@@ -52,6 +53,7 @@ function App() {
       <Route path="/quotes/formal/:quoteId" element={<FormalQuoteDetail />} />
       <Route path="/quotes/edit/:quoteId" element={<EditQuote />} />
       <Route path="/settings" element={<BusinessSettings />} />
+      <Route path="/setup-wizard" element={<SetupWizard />} />
     </Routes>
   );
 }
