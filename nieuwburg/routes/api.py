@@ -854,6 +854,58 @@ def api_convert_quote_to_invoice(quote_id):
         traceback.print_exc()
         return jsonify({"message": f"An internal error occurred: {str(e)}"}), 500
     
+@bp.route('/admin/service-categories', methods=['POST'])
+@login_required
+def create_service_category():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    data = request.get_json()
+    name = data.get('name')
+    
+    if not name:
+        return jsonify({"message": "Category name is required"}), 400
+        
+    try:
+        # Check for duplicates within this tenant
+        existing = ServiceCategory.query.filter_by(name=name, tenant_id=current_user.tenant_id).first()
+        if existing:
+            return jsonify({"message": "Category already exists"}), 400
+
+        new_cat = ServiceCategory(
+            name=name,
+            description=data.get('description', ''),
+            tenant_id=current_user.tenant_id
+        )
+        db.session.add(new_cat)
+        db.session.commit()
+        
+        log_activity('Category Created', f"Admin created category: {name}")
+        return jsonify({"id": new_cat.id, "name": new_cat.name, "message": "Category created"}), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": str(e)}), 500
+
+@bp.route('/admin/service-categories/<int:cat_id>', methods=['DELETE'])
+@login_required
+def delete_service_category(cat_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    category = ServiceCategory.query.filter_by(id=cat_id, tenant_id=current_user.tenant_id).first()
+    if not category:
+        return jsonify({"message": "Category not found"}), 404
+        
+    try:
+        db.session.delete(category)
+        db.session.commit()
+        log_activity('Category Deleted', f"Admin deleted category ID: {cat_id}")
+        return jsonify({"message": "Category deleted successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": str(e)}), 500
+    
 @bp.route('/admin/service-categories', methods=['GET'])
 @login_required
 def get_service_categories():
@@ -861,20 +913,30 @@ def get_service_categories():
         return jsonify({"message": "Permission denied"}), 403
     
     try:
-        # TENANT AWARE
+        # Fetch categories with items
         categories = ServiceCategory.query.options(
-            joinedload(ServiceCategory.items)
+            joinedload(ServiceCategory.items).joinedload(ServiceItem.linked_clauses)
         ).filter_by(
-            tenant_id=current_user.tenant_id # <--- SECURITY
+            tenant_id=current_user.tenant_id
         ).order_by(ServiceCategory.name).all()
         
         categories_data = []
         for category in categories:
-            items_data = [{
-                'id': item.id,
-                'name': item.name,
-                'estimated_time_mins': item.estimated_time_mins
-            } for item in category.items]
+            items_data = []
+            for item in category.items:
+                # --- THE FIX: Include ALL new fields here ---
+                items_data.append({
+                    'id': item.id,
+                    'name': item.name,
+                    'description': item.description, # <--- Was missing
+                    'estimated_time_mins': item.estimated_time_mins,
+                    'pricing_type': item.pricing_type, # <--- Was missing
+                    'default_rate': item.default_rate, # <--- Was missing
+                    'is_material': item.is_material,   # <--- Was missing
+                    'is_variable_price': item.is_variable_price, # <--- Was missing
+                    'category_id': item.category_id,
+                    'linked_clause_ids': [c.id for c in item.linked_clauses]
+                })
             
             categories_data.append({
                 'id': category.id,
@@ -922,53 +984,108 @@ def get_service_item(item_id):
         traceback.print_exc()
         return jsonify({"message": "Error fetching service item."}), 500
 
+@bp.route('/admin/service-items', methods=['POST'])
+@login_required
+def create_service_item():
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    data = request.get_json()
+    if not data.get('name') or not data.get('category_id'):
+        return jsonify({"message": "Name and Category are required"}), 400
+        
+    try:
+        category = ServiceCategory.query.filter_by(id=data['category_id'], tenant_id=current_user.tenant_id).first()
+        if not category:
+            return jsonify({"message": "Invalid Category"}), 400
+
+        new_item = ServiceItem(
+            name=data['name'],
+            description=data.get('description', ''), # Capture the long description
+            category_id=data['category_id'],
+            estimated_time_mins=int(data.get('estimated_time_mins', 0)),
+            pricing_type=data.get('pricing_type', 'fixed'),
+            default_rate=float(data.get('default_rate', 0.0)),
+            is_material=bool(data.get('is_material', False)),
+            is_variable_price=bool(data.get('is_variable_price', False)),
+            tenant_id=current_user.tenant_id
+        )
+        
+        if 'linked_clause_ids' in data:
+             clauses = ServiceClause.query.filter(
+                ServiceClause.id.in_(data['linked_clause_ids']),
+                ServiceClause.tenant_id == current_user.tenant_id
+            ).all()
+             new_item.linked_clauses = clauses
+
+        db.session.add(new_item)
+        db.session.commit()
+        
+        log_activity('Service Created', f"Admin created service: {new_item.name}")
+        return jsonify(new_item.to_dict()), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": str(e)}), 500
+
 @bp.route('/admin/service-items/<int:item_id>', methods=['PUT'])
 @login_required
 def update_service_item(item_id):
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
         
-    # TENANT AWARE
-    service_item = ServiceItem.query.filter_by(
-        id=item_id,
-        tenant_id=current_user.tenant_id
-    ).first()
-
+    service_item = ServiceItem.query.filter_by(id=item_id, tenant_id=current_user.tenant_id).first()
     if not service_item:
         return jsonify({"message": "Service item not found"}), 404
         
     data = request.get_json()
-    if not data:
-        return jsonify({"message": "No data provided"}), 400
-        
+    
     try:
         service_item.name = data.get('name', service_item.name)
-        service_item.estimated_time_mins = data.get('estimated_time_mins', service_item.estimated_time_mins)
-        
-        linked_clause_ids = data.get('linked_clause_ids', [])
-        
-        # Fetch clauses, ensuring they ALSO belong to this tenant
-        clauses = ServiceClause.query.filter(
-            ServiceClause.id.in_(linked_clause_ids),
-            ServiceClause.tenant_id == current_user.tenant_id
-        ).all()
-        
-        service_item.linked_clauses = clauses
+        service_item.description = data.get('description', service_item.description) # Update description
+        service_item.estimated_time_mins = int(data.get('estimated_time_mins', service_item.estimated_time_mins))
+        service_item.pricing_type = data.get('pricing_type', service_item.pricing_type)
+        service_item.default_rate = float(data.get('default_rate', service_item.default_rate))
+        service_item.is_material = bool(data.get('is_material', service_item.is_material))
+        service_item.is_variable_price = bool(data.get('is_variable_price', service_item.is_variable_price))
+
+        if 'category_id' in data and data['category_id'] != service_item.category_id:
+            cat = ServiceCategory.query.filter_by(id=data['category_id'], tenant_id=current_user.tenant_id).first()
+            if cat:
+                service_item.category_id = cat.id
+
+        if 'linked_clause_ids' in data:
+            clauses = ServiceClause.query.filter(
+                ServiceClause.id.in_(data['linked_clause_ids']),
+                ServiceClause.tenant_id == current_user.tenant_id
+            ).all()
+            service_item.linked_clauses = clauses
         
         db.session.commit()
-        log_activity('Service Item Updated', f"Admin '{current_user.email}' updated service item: {service_item.name}")
-        
-        return jsonify({
-            'id': service_item.id,
-            'name': service_item.name,
-            'estimated_time_mins': service_item.estimated_time_mins
-        }), 200
+        return jsonify(service_item.to_dict()), 200
         
     except Exception as e:
         db.session.rollback()
-        print(f"Error updating service item {item_id}: {e}")
-        traceback.print_exc()
-        return jsonify({"message": f"An error occurred: {str(e)}"}), 500
+        return jsonify({"message": str(e)}), 500
+
+@bp.route('/admin/service-items/<int:item_id>', methods=['DELETE'])
+@login_required
+def delete_service_item(item_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({"message": "Permission denied"}), 403
+        
+    service_item = ServiceItem.query.filter_by(id=item_id, tenant_id=current_user.tenant_id).first()
+    if not service_item:
+        return jsonify({"message": "Service item not found"}), 404
+        
+    try:
+        db.session.delete(service_item)
+        db.session.commit()
+        log_activity('Service Deleted', f"Admin deleted service ID: {item_id}")
+        return jsonify({"message": "Service deleted successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": str(e)}), 500
     
 @bp.route('/admin/all-services', methods=['GET'])
 @login_required
@@ -2562,3 +2679,60 @@ def save_setup_wizard():
         print(f"Error saving setup wizard data for tenant {tenant_id}: {e}")
         traceback.print_exc()
         return jsonify({"message": f"An internal error occurred: {str(e)}"}), 500
+    
+@bp.route('/invoice/initiate-payment', methods=['POST'])
+def initiate_invoice_payment():
+    """
+    Called by the frontend to start a Paystack transaction for an INVOICE.
+    Now in API blueprint to bypass default CSRF (since API is exempted).
+    """
+    data = request.json
+    token = data.get('token')
+    email = data.get('email') 
+    
+    invoice = Invoice.query.filter_by(payment_token=token).first()
+    if not invoice:
+        return jsonify({'message': 'Invalid invoice'}), 404
+
+    if invoice.status == 'Paid':
+        return jsonify({'message': 'Invoice is already paid'}), 400
+
+    try:
+        paystack_secret = os.environ.get('PAYSTACK_SECRET_KEY')
+        url = "https://api.paystack.co/transaction/initialize"
+        headers = {
+            "Authorization": f"Bearer {paystack_secret}",
+            "Content-Type": "application/json"
+        }
+        
+        amount_cents = int(invoice.total * 100)
+        
+        # We direct the callback to the main.py route that handles logic
+        payload = {
+            "email": email,
+            "amount": amount_cents,
+            "callback_url": url_for('main.payment_callback', _external=True),
+            "metadata": {
+                "type": "invoice_payment",
+                "invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number
+            }
+        }
+        
+        response = requests.post(url, headers=headers, json=payload)
+        response_data = response.json()
+        
+        if not response_data['status']:
+            raise Exception(response_data['message'])
+
+        # Save reference
+        invoice.payment_reference = response_data['data']['reference']
+        db.session.commit()
+
+        return jsonify({
+            'authorization_url': response_data['data']['authorization_url']
+        })
+
+    except Exception as e:
+        print(f"Invoice Payment Init Error: {e}")
+        return jsonify({'message': 'Could not initialize payment'}), 500

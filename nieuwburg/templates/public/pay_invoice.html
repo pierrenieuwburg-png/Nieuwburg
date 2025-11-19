@@ -73,6 +73,9 @@
         const email = document.getElementById('payer-email').value;
         const btn = this;
         const msg = document.getElementById('pay-msg');
+        
+        // --- 1. GET THE CSRF TOKEN FROM THE PAGE ---
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
         if (!email || !email.includes('@')) {
             alert("Please enter a valid email address.");
@@ -87,7 +90,8 @@
             const response = await fetch('/api/invoice/initiate-payment', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken // --- 2. SEND IT IN THE HEADER ---
                 },
                 body: JSON.stringify({
                     token: "{{ invoice.payment_token }}",
@@ -100,7 +104,12 @@
             if (data.authorization_url) {
                 window.location.href = data.authorization_url;
             } else {
-                alert(data.message || "Payment initialization failed.");
+                // Handle CSRF error specifically if it happens again
+                if (response.status === 400 && data.message?.includes("CSRF")) {
+                    alert("Security token expired. Please refresh the page and try again.");
+                } else {
+                    alert(data.message || "Payment initialization failed.");
+                }
                 btn.disabled = false;
                 btn.innerText = "Pay Now Securely";
             }

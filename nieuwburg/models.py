@@ -329,12 +329,21 @@ class ServiceCategory(db.Model):
 
 class ServiceItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(100), nullable=False) # Short name (e.g. "Exterior Painting")
+    description = db.Column(db.Text, nullable=True)  # NEW: Long "Scope of Work"
     estimated_time_mins = db.Column(db.Integer, default=0)
-    category_id = db.Column(db.Integer, db.ForeignKey('service_category.id'), nullable=False)
-    prices = db.relationship('ServicePrice', back_populates='service_item', lazy=True, cascade="all, delete-orphan")
     
-    # --- MODIFIED: Changed backref to back_populates ---
+    # --- PRICING FIELDS ---
+    pricing_type = db.Column(db.String(20), default='fixed') # 'fixed', 'hourly', 'sqm', 'liter', 'meter', 'unit'
+    default_rate = db.Column(db.Float, default=0.0)
+    is_material = db.Column(db.Boolean, default=False)
+    is_variable_price = db.Column(db.Boolean, default=False)
+    # ----------------------
+
+    category_id = db.Column(db.Integer, db.ForeignKey('service_category.id'), nullable=False)
+    
+    # Relationships
+    prices = db.relationship('ServicePrice', back_populates='service_item', lazy=True, cascade="all, delete-orphan")
     category = db.relationship('ServiceCategory', back_populates='items')
     quote_line_items = db.relationship('QuoteLineItem', back_populates='service_item')
     jobs = db.relationship('Job', back_populates='service')
@@ -345,10 +354,21 @@ class ServiceItem(db.Model):
         back_populates='service_items'
     )
     
-    # --- NEW TENANCY FIELDS ---
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
     tenant = db.relationship('Tenant', back_populates='service_items')
-    # --- END NEW TENANCY FIELDS ---
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description, # Include in API response
+            'pricing_type': self.pricing_type,
+            'default_rate': self.default_rate,
+            'estimated_time_mins': self.estimated_time_mins,
+            'is_material': self.is_material,
+            'is_variable_price': self.is_variable_price,
+            'category_id': self.category_id
+        }
 
 class ServicePrice(db.Model):
     id = db.Column(db.Integer, primary_key=True)

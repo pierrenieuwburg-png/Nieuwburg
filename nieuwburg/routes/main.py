@@ -12,6 +12,7 @@ from ..forms import PlacementApplicationForm
 from .auth import generate_confirmation_token
 from .utils import send_async_email
 
+
 bp = Blueprint('main', __name__)
 
 # --- Public Facing Page Routes ---
