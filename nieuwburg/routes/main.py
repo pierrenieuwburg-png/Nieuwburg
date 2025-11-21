@@ -19,6 +19,7 @@ bp = Blueprint('main', __name__)
 
 @bp.route('/')
 def index():
+    maps_key = current_app.config.get('GOOGLE_MAPS_API_KEY')
     return render_template('public/index.html')
 
 @bp.route('/blog')

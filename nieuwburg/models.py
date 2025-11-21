@@ -19,6 +19,12 @@ class Tenant(db.Model):
     paystack_reference = db.Column(db.String(100), unique=True, nullable=True)
     is_active = db.Column(db.Boolean, default=False, nullable=False) 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    verification_status = db.Column(db.String(20), default='unverified', nullable=False)
+    
+    compliance_docs = db.Column(JSON, nullable=True)
+    
+    admin_notes = db.Column(db.Text, nullable=True)
 
     # --- Relationships ---
     users = db.relationship('User', back_populates='tenant', lazy=True)

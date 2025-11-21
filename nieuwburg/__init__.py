@@ -85,6 +85,11 @@ def create_app(config_class=Config):
     def inject_now():
         """Injects the current UTC time into all templates."""
         return {'now': datetime.utcnow()}
+    
+    @app.context_processor
+    def inject_maps_key():
+        """Injects the Google Maps API key into all templates."""
+        return {'google_maps_api_key': app.config['GOOGLE_MAPS_API_KEY']}
 
     @app.context_processor
     def inject_auth_forms():

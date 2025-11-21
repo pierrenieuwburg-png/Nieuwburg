@@ -246,7 +246,55 @@ main {
     justify-content: center;
     gap: 15px;
 }
+/* =========================================
+   2. POPULAR SERVICES (Sleek Horizontal Pills)
+   ========================================= */
+.categories-section {
+    padding: 50px 0;
+    background-color: white; /* Clean white background */
+    border-bottom: 1px solid #f1f5f9;
+}
 
+.category-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center; /* Center the row */
+    gap: 15px; /* Tight spacing */
+    margin-top: 30px;
+}
+
+.cat-card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 50px; /* Pill shape for "Sleek" look */
+    padding: 12px 25px;  /* Compact padding */
+    display: flex;
+    align-items: center;
+    gap: 12px; /* Space between icon and text */
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+    min-width: 160px; /* Ensure consistency */
+}
+
+.cat-card:hover {
+    border-color: #006ac6; /* Brand Accent */
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 106, 198, 0.1);
+}
+
+.cat-card .icon {
+    font-size: 1.2rem; /* Smaller, cleaner icon */
+    margin-bottom: 0;  /* Remove bottom margin since it's horizontal now */
+    line-height: 1;
+}
+
+.cat-card h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #334155;
+}
 /* --- HOW IT WORKS SECTION --- */
 .how-it-works-section {
     padding: 80px 0;
@@ -378,99 +426,100 @@ main {
     color: var(--text-dark);
 }
 
-/* --- PLACEMENTS SECTION --- */
+/* =========================================
+   6. PLACEMENTS (Rectangular Cards - Fixed)
+   ========================================= */
 .placements-section {
     padding: 80px 0;
-    background-color: var(--bg-light); 
-}
-.placements-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 30px;
-}
-.placement-card {
-    background-color: white;
-    padding: 35px;
-    text-align: center;
-    border: 1px solid var(--border-color);
-    transition: all 0.3s ease-in-out;
-    display: flex;
-    flex-direction: column;
-    border-radius: 4px; 
-}
-.placement-card:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 15px 30px -10px rgba(0, 34, 68, 0.15);
+    background-color: #f8fafc; /* LIGHT GREY BG - Fixes "fading" issue */
 }
 
-.placement-card .placement-icon {
-    width: 60px;
+.placements-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr); /* Force 3 columns */
+    gap: 25px; /* Balanced spacing */
+    max-width: 1000px; /* Prevent them from getting too wide */
+    margin: 40px auto 0;
+}
+
+.placement-card {
+    background: white;
+    border: 1px solid transparent; /* No border needed with shadow + colored bg */
+    border-radius: 12px;
+    padding: 35px 25px; /* Reduced padding to fix "Too Big" */
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
+    position: relative;
+    top: 0;
+}
+
+.placement-card:hover {
+    top: -5px; /* Physical lift effect */
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.placement-icon {
+    width: 60px; /* Smaller Icon Bubble */
     height: 60px;
-    border-radius: 50%;
+    background-color: #f0f9ff; /* Very light blue */
+    border-radius: 10px; /* Soft square */
     display: flex;
     align-items: center;
     justify-content: center;
-    margin: 0 auto 25px;
-    background-color: #E6F0FA; 
-    transition: background-color 0.3s ease;
-}
-.placement-card .placement-icon svg {
-    width: 28px;
-    height: 28px;
-    stroke-width: 1.5;
-    color: var(--accent); 
-}
-
-.placement-card:nth-child(2) {
-    background-color: var(--primary-dark);
-    color: white;
-}
-.placement-card:nth-child(2) .placement-icon {
-    background-color: white;
-}
-.placement-card:nth-child(2) h3 {
-    color: white;
-}
-.placement-card:nth-child(2) p {
-    color: rgba(255, 255, 255, 0.8);
-}
-.placement-card:nth-child(2) .cta-outline {
-    border-color: white;
-    color: white;
-}
-.placement-card:nth-child(2):hover .cta-outline {
-    background-color: white;
-    color: var(--primary-dark);
-}
-
-.placement-card:not(:nth-child(2)):hover {
-    background-color: var(--primary-dark);
-    color: white;
-}
-.placement-card:not(:nth-child(2)):hover h3 {
-    color: white;
-}
-.placement-card:not(:nth-child(2)):hover p {
-    color: rgba(255, 255, 255, 0.8);
-}
-.placement-card:not(:nth-child(2)):hover .cta-outline {
-    border-color: white;
-    color: white;
+    margin-bottom: 20px;
+    color: #006ac6; /* Brand Accent */
+    font-size: 1.4rem;
 }
 
 .placement-card h3 {
-    font-size: 1.4rem;
-    margin: 0 0 10px 0;
-    text-transform: none;
-    font-family: 'Montserrat', sans-serif;
+    font-size: 1.15rem;
+    margin: 0 0 12px 0;
+    color: #0f172a;
     font-weight: 700;
-    color: var(--text-dark);
 }
+
 .placement-card p {
-    color: var(--text-light);
-    line-height: 1.7;
-    margin: 0 0 30px 0;
+    color: #64748b;
+    font-size: 0.95rem;
+    margin-bottom: 25px;
+    line-height: 1.5;
     flex-grow: 1;
+}
+
+/* Link Arrow - Make it look like a button-link */
+.link-arrow {
+    color: #006ac6;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: gap 0.2s ease;
+}
+
+.link-arrow:hover {
+    gap: 8px; /* Arrow moves on hover */
+}
+
+/* Responsive Fixes */
+@media (max-width: 900px) {
+    .placements-grid {
+        grid-template-columns: 1fr; /* Stack on mobile */
+        max-width: 400px;
+    }
+    .category-grid {
+        gap: 10px;
+    }
+    .cat-card {
+        padding: 10px 20px;
+        flex: 1 0 auto; /* Allow them to grow/shrink */
+    }
 }
 
 /* --- CLIENT HUB SECTION --- */
@@ -3949,4 +3998,335 @@ input.invalid-input {
     .pricing-card.featured {
         transform: scale(1); /* Don't scale on mobile */
     }
+}
+/* --- NEW SEARCH WIDGET STYLES --- */
+.search-widget-container {
+    max-width: 850px;
+    margin: 30px auto 0;
+}
+
+.search-widget {
+    background: white;
+    padding: 10px;
+    border-radius: 100px; /* Pill shape */
+    display: flex;
+    align-items: center;
+    box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+    border: 1px solid rgba(0,0,0,0.05);
+}
+
+.input-group {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    padding: 0 25px;
+}
+
+.input-icon {
+    font-size: 1.2rem;
+    color: #0f172a;
+    margin-right: 15px;
+    opacity: 0.7;
+}
+
+.input-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+}
+
+.input-wrapper label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.input-wrapper input {
+    border: none;
+    outline: none;
+    font-size: 1rem;
+    color: #334155;
+    width: 100%;
+    background: transparent;
+}
+
+.input-divider {
+    width: 1px;
+    height: 40px;
+    background-color: #e2e8f0;
+}
+
+.search-btn {
+    background-color: #0f172a; /* Brand Navy */
+    color: white;
+    border: none;
+    height: 60px;
+    width: 60px; /* Circle button on mobile, pill on desktop if desired */
+    border-radius: 50%;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 1rem;
+    transition: transform 0.2s, background-color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 10px;
+}
+
+.search-btn:hover {
+    background-color: #1e293b;
+    transform: scale(1.05);
+}
+
+/* Expanded button text for desktop */
+@media (min-width: 768px) {
+    .search-btn {
+        width: auto;
+        border-radius: 50px;
+        padding: 0 35px;
+    }
+}
+
+.trust-badge {
+    margin-top: 15px;
+    color: rgba(255,255,255,0.9);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+/* --- PARTNER TEASER SECTION --- */
+.partner-teaser-section {
+    background-color: #0f172a; /* Dark Navy */
+    padding: 80px 0;
+    color: white;
+    position: relative;
+    overflow: hidden;
+}
+
+.partner-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 50px;
+}
+
+.partner-content {
+    flex: 1;
+}
+
+.partner-content .tag {
+    background: rgba(255,255,255,0.1);
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #60a5fa; /* Light blue */
+    margin-bottom: 15px;
+    display: inline-block;
+}
+
+.partner-features {
+    list-style: none;
+    padding: 0;
+    margin: 30px 0;
+}
+
+.partner-features li {
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    font-size: 1.1rem;
+}
+
+.partner-features i {
+    color: #10b981; /* Green check */
+    margin-right: 15px;
+}
+
+.partner-image {
+    flex: 1;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+    transform: perspective(1000px) rotateY(-5deg); /* Subtle 3D effect */
+    transition: transform 0.3s;
+}
+
+.partner-image:hover {
+    transform: perspective(1000px) rotateY(0deg);
+}
+
+.partner-image img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* --- COMPARISON SECTION --- */
+.comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0; /* Connected cards */
+    max-width: 900px;
+    margin: 0 auto;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+}
+
+.compare-card {
+    padding: 40px;
+}
+
+.compare-card.old-way {
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+.compare-card.blitz-way {
+    background: #ffffff;
+    color: #0f172a;
+    border: 2px solid #0f172a;
+    position: relative;
+    z-index: 1;
+    transform: scale(1.05); /* Pop out */
+}
+
+.compare-card h3 {
+    font-size: 1.5rem;
+    margin-bottom: 20px;
+}
+
+.compare-card ul {
+    list-style: none;
+    padding: 0;
+}
+
+.compare-card li {
+    margin-bottom: 10px;
+    padding-left: 20px;
+    position: relative;
+}
+
+.compare-card.old-way li::before { content: "×"; color: #ef4444; position: absolute; left: 0; font-weight: bold; }
+.compare-card.blitz-way li::before { content: "✓"; color: #10b981; position: absolute; left: 0; font-weight: bold; }
+
+/* --- MARKETPLACE RESULTS (The 3-Pack) --- */
+.results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 30px;
+    max-width: 1000px;
+    margin: 0 auto;
+    justify-content: center;
+}
+
+/* Highlight the cards to look like a "Podium" */
+.service-card {
+    border: 1px solid #e2e8f0;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+/* Make the center card pop (if we have 3) */
+@media (min-width: 900px) {
+    .service-card:nth-child(2) {
+        transform: scale(1.05);
+        border-color: #006ac6;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        z-index: 1;
+    }
+    .service-card:nth-child(2)::before {
+        content: "BEST MATCH";
+        position: absolute;
+        top: -12px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #006ac6;
+        color: white;
+        font-size: 0.7rem;
+        font-weight: bold;
+        padding: 4px 12px;
+        border-radius: 12px;
+    }
+}
+
+/* --- PROVIDER SPOTLIGHT MODAL --- */
+.provider-spotlight {
+    padding: 0; /* We handle padding internally */
+    overflow: hidden;
+    max-width: 600px;
+    border-radius: 16px;
+}
+
+.spotlight-header {
+    background: #f8fafc;
+    padding: 30px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.spotlight-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: #002244;
+    color: white;
+    font-size: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.spotlight-info h2 {
+    margin: 0 0 8px 0;
+    font-family: 'Oswald', sans-serif;
+    color: #0f172a;
+}
+
+.spotlight-badges {
+    display: flex;
+    gap: 10px;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+}
+
+.badge-verified { color: #059669; font-weight: 600; }
+.badge-rating { color: #f59e0b; font-weight: 600; }
+.badge-year { color: #64748b; }
+
+.spotlight-body {
+    padding: 30px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.spotlight-price {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #006ac6;
+    margin: 10px 0 20px;
+}
+
+.spotlight-description {
+    line-height: 1.6;
+    color: #334155;
+    white-space: pre-wrap; /* Preserves line breaks from your new description field */
+}
+
+.spotlight-footer {
+    padding: 20px 30px;
+    background: white;
+    border-top: 1px solid #e2e8f0;
+    position: sticky;
+    bottom: 0;
 }

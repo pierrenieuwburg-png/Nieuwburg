@@ -26,7 +26,12 @@ def search_marketplace():
     query = query.join(BusinessSettings)
 
     # 3. Join Category for filtering and display
-    query = query.join(ServiceCategory)
+    query = query.join(ServiceCategory, ServiceItem.category_id == ServiceCategory.id)
+
+    query = ServiceItem.query.join(Tenant).filter(
+        Tenant.is_active == True,
+        Tenant.verification_status == 'verified' # <--- THE TRUST FILTER
+    )
 
     # --- APPLY FILTERS ---
 
@@ -76,9 +81,12 @@ def search_marketplace():
             "tenant": {
                 "id": item.tenant.id,
                 "name": item.tenant.business_name,
-                "location": item.tenant.business_settings.business_address
+                "location": item.tenant.business_settings.business_address,
+                "member_since": item.member_since,
+                "rating": item.rating,
+                "review_count": item.review_count
             },
-            "category": item.category.name
+            "category": item.category.name if item.category else "General"
         })
 
     return jsonify(data)

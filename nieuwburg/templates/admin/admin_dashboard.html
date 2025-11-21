@@ -1,6 +1,30 @@
 {% extends "admin/admin_base.html" %}
 {% block title %}Dashboard{% endblock %}
 
+{% if current_user.role == 'admin' and current_user.tenant.verification_status != 'verified' %}
+<div class="alert-banner warning" style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ffeeba; display: flex; align-items: center; justify-content: space-between;">
+    <div style="display: flex; align-items: center; gap: 15px;">
+        <i class="fas fa-exclamation-triangle" style="font-size: 1.5rem;"></i>
+        <div>
+            <strong>Your profile is hidden from the Marketplace.</strong>
+            <p style="margin: 0; font-size: 0.9rem;">
+                {% if current_user.tenant.verification_status == 'pending' %}
+                    We are reviewing your documents. This usually takes 24-48 hours.
+                {% else %}
+                    Upload your Trade Certificate or ID to unlock public leads and build trust.
+                {% endif %}
+            </p>
+        </div>
+    </div>
+    
+    {% if current_user.tenant.verification_status == 'unverified' %}
+        <a href="{{ url_for('admin.verification_upload') }}" class="cta cta-small" style="background: #856404; color: white; text-decoration: none; padding: 8px 15px; border-radius: 4px;">
+            Verify Now
+        </a>
+    {% endif %}
+</div>
+{% endif %}
+
 {% block content %}
 <div class="admin-header">
   <h1>Dashboard</h1>

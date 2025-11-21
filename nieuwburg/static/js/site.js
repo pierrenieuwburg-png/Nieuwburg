@@ -1328,54 +1328,84 @@ function attachCalculationAndSubmissionLogic(category) {
     };
 }
 
-// --- GOOGLE MAPS FUNCTIONALITY ---
+// --- GOOGLE MAPS FUNCTIONALITY (Consolidated) ---
 let map;
 let marker;
 let autocomplete;
 
 function initMap() {
-    if (mapInitialized) {
-        return;
-    }
+    // Prevent double-loading
+    if (mapInitialized) return;
     mapInitialized = true;
-    initBookingModal(); // Initialize the booking system ONLY AFTER the map is ready.
 
-    if (!document.getElementById("map")) return;
+    // 1. Initialize the Booking Modal Logic (if present)
+    // This connects your services/pricing logic
+    if (typeof initBookingModal === "function") {
+        initBookingModal(); 
+    }
 
-    const capeTown = { lat: -33.9249, lng: 18.4241 };
-    map = new google.maps.Map(document.getElementById("map"), {
-        zoom: 12,
-        center: capeTown,
-        mapTypeControl: false,
-        streetViewControl: false,
-    });
-    marker = new google.maps.Marker({ map, position: capeTown, draggable: true });
-    const streetAddressInput = document.getElementById("street-address");
-    autocomplete = new google.maps.places.Autocomplete(streetAddressInput, {
-        componentRestrictions: { country: "za" },
-        fields: ["address_components", "geometry", "name", "formatted_address"], // Add formatted_address
-        types: ["address"],
-    });
-
-    autocomplete.addListener("place_changed", () => {
-        const place = autocomplete.getPlace();
-        if (!place.geometry || !place.geometry.location) return;
-
-        // ** THIS IS THE CHANGE **
-        streetAddressInput.value = place.formatted_address; // Use the full formatted address
-        
-        map.setCenter(place.geometry.location);
-        map.setZoom(17);
-        marker.setPosition(place.geometry.location);
-    });
-
-    marker.addListener('dragend', () => {
-        const geocoder = new google.maps.Geocoder();
-        geocoder.geocode({ 'location': marker.getPosition() }, (results, status) => {
-            if (status === 'OK' && results[0]) {
-                // ** THIS IS THE CHANGE **
-                streetAddressInput.value = results[0].formatted_address; // Use the full formatted address
-            } else { console.error('Geocoder failed due to: ' + status); }
+    // 2. HOMEPAGE HERO SEARCH (The New Part)
+    const heroInput = document.getElementById('hero-location-input');
+    if (heroInput) {
+        const heroAutocomplete = new google.maps.places.Autocomplete(heroInput, {
+            componentRestrictions: { country: "za" }, // South Africa only
+            fields: ["formatted_address", "geometry", "name"],
+            types: ["geocode"] // Favor addresses
         });
-    });
+
+        // When user selects an address, just ensure the text is correct
+        heroAutocomplete.addListener("place_changed", () => {
+             const place = heroAutocomplete.getPlace();
+             if (place.formatted_address) {
+                 heroInput.value = place.formatted_address;
+             }
+        });
+    }
+
+    // 3. BOOKING MODAL MAP (The Existing Part)
+    const mapElement = document.getElementById("map");
+    const streetAddressInput = document.getElementById("street-address");
+
+    if (mapElement && streetAddressInput) {
+        const capeTown = { lat: -33.9249, lng: 18.4241 };
+        
+        map = new google.maps.Map(mapElement, {
+            zoom: 12,
+            center: capeTown,
+            mapTypeControl: false,
+            streetViewControl: false,
+        });
+        
+        marker = new google.maps.Marker({ map, position: capeTown, draggable: true });
+        
+        autocomplete = new google.maps.places.Autocomplete(streetAddressInput, {
+            componentRestrictions: { country: "za" },
+            fields: ["formatted_address", "geometry", "name"],
+            types: ["address"],
+        });
+
+        autocomplete.addListener("place_changed", () => {
+            const place = autocomplete.getPlace();
+            if (!place.geometry || !place.geometry.location) return;
+
+            streetAddressInput.value = place.formatted_address;
+            map.setCenter(place.geometry.location);
+            map.setZoom(17);
+            marker.setPosition(place.geometry.location);
+        });
+
+        marker.addListener('dragend', () => {
+            const geocoder = new google.maps.Geocoder();
+            geocoder.geocode({ 'location': marker.getPosition() }, (results, status) => {
+                if (status === 'OK' && results[0]) {
+                    streetAddressInput.value = results[0].formatted_address;
+                } else { 
+                    console.error('Geocoder failed due to: ' + status); 
+                }
+            });
+        });
+    }
 }
+
+// Expose to global scope so Google Script can find it
+window.initMap = initMap;
