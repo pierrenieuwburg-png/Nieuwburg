@@ -2,7 +2,7 @@ import os
 import requests
 import traceback
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, jsonify
-from flask_login import login_required, current_user
+from flask_login import login_required, current_user, login_user, logout_user
 from flask_mail import Message
 from datetime import date
 
@@ -208,79 +208,95 @@ def initiate_invoice_payment():
         return jsonify({'message': 'Could not initialize payment'}), 500
 
 
-@bp.route('/payment/callback')
+@bp.route('/payment-callback')
 def payment_callback():
-    """
-    Unified Callback: Handles both SaaS Subscriptions AND Invoice Payments.
-    """
     reference = request.args.get('reference')
     if not reference:
-        flash('Invalid payment reference.', 'error')
-        return redirect(url_for('main.index'))
-
-    paystack_secret = os.environ.get('PAYSTACK_SECRET_KEY')
-    verify_url = f"https://api.paystack.co/transaction/verify/{reference}"
-    headers = {"Authorization": f"Bearer {paystack_secret}"}
+        flash('No payment reference provided.', 'error')
+        return redirect(url_for('main.pricing'))
 
     try:
+        # 1. Verify Transaction
+        paystack_secret = os.environ.get('PAYSTACK_SECRET_KEY')
+        headers = {"Authorization": f"Bearer {paystack_secret}"}
+        verify_url = f"https://api.paystack.co/transaction/verify/{reference}"
+        
         response = requests.get(verify_url, headers=headers)
-        data = response.json()
+        response_data = response.json()
 
-        if not (data.get('status') and data['data']['status'] == 'success'):
-            flash('Payment failed.', 'error')
-            return redirect(url_for('main.index'))
+        if not response_data['status']:
+            flash(f"Payment verification failed: {response_data['message']}", 'error')
+            return redirect(url_for('main.pricing'))
 
-        # --- DETERMINE PAYMENT TYPE ---
-        metadata = data['data'].get('metadata', {})
-        payment_type = metadata.get('type')
-
-        if payment_type == 'invoice_payment':
-            # --- HANDLE INVOICE PAYMENT ---
-            invoice_id = metadata.get('invoice_id')
-            invoice = db.session.get(Invoice, invoice_id)
-            
-            if invoice:
-                invoice.status = 'Paid'
-                invoice.payment_reference = reference
+        data = response_data['data']
+        metadata = data.get('metadata', {})
+        
+        if data['status'] == 'success':
+            # ---------------------------------------------------------
+            # SCENARIO A: SUBSCRIPTION PAYMENT (New Tenant or Upgrade)
+            # ---------------------------------------------------------
+            if 'plan_type' in metadata:
+                tenant_id = metadata.get('tenant_id')
+                user_id = metadata.get('user_id')
+                
+                # Activate Tenant
+                tenant = Tenant.query.get(tenant_id)
+                if tenant:
+                    tenant.is_active = True
+                    tenant.paystack_reference = reference
+                
+                # Activate User
+                user = User.query.get(user_id)
+                if user:
+                    user.is_confirmed = True
+                    user.confirmed_on = datetime.utcnow()
+                    
+                    # Force Login (Handles both new and upgraded users)
+                    login_user(user)
+                
                 db.session.commit()
                 
-                flash(f'Payment successful! Invoice {invoice.invoice_number} is now Paid.', 'success')
-                return redirect(url_for('main.public_invoice_pay', token=invoice.payment_token))
-            else:
-                 flash('Invoice not found.', 'error')
-                 return redirect(url_for('main.index'))
+                flash("Payment successful! Welcome to Nieuwburg Blitz.", 'success')
+                
+                # FIX: Redirect to Setup Wizard instead of Dashboard
+                return redirect(url_for('admin.admin_spa_shell', path='setup-wizard'))
+
+            # ---------------------------------------------------------
+            # SCENARIO B: INVOICE PAYMENT
+            # ---------------------------------------------------------
+            elif metadata.get('type') == 'invoice_payment':
+                invoice_id = metadata.get('invoice_id')
+                invoice = Invoice.query.get(invoice_id)
+                if invoice:
+                    invoice.status = 'Paid'
+                    invoice.payment_reference = reference
+                    db.session.commit()
+                    return redirect(url_for('main.public_invoice_pay', token=invoice.payment_token))
+            
+            # ---------------------------------------------------------
+            # SCENARIO C: QUOTE DEPOSIT
+            # ---------------------------------------------------------
+            elif 'quote_id' in metadata:
+                quote_id = metadata.get('quote_id')
+                quote = Quote.query.get(quote_id)
+                if quote:
+                    quote.deposit_paid = True
+                    quote.status = 'Accepted' # Auto-accept on deposit
+                    db.session.commit()
+                    flash('Deposit received. Quote accepted!', 'success')
+                    # Redirect to the quote view
+                    return redirect(url_for('main.public_quote_view', token=quote.acceptance_token))
 
         else:
-            # --- HANDLE SAAS SUBSCRIPTION ---
-            tenant = Tenant.query.filter_by(paystack_reference=reference).first()
-            if tenant:
-                user = User.query.filter_by(tenant_id=tenant.id, role='admin').first()
-                if user and not user.is_confirmed:
-                    token = generate_confirmation_token(user.email)
-                    confirm_url = url_for('auth.confirm_email', token=token, _external=True)
-                    logo_url = url_for('static', filename='img/LogoBlackWithTitle.png', _external=True)
-                    
-                    msg = Message(
-                        subject="[Nieuwburg Blitz] Activate Your Account",
-                        sender=current_app.config['MAIL_USERNAME'],
-                        recipients=[user.email]
-                    )
-                    msg.html = render_template(
-                        'email/welcome_activate.html', 
-                        confirm_url=confirm_url, 
-                        logo_url=logo_url, 
-                        business_name=tenant.business_name
-                    )
-                    send_async_email(current_app._get_current_object(), msg)
-                    return redirect(url_for('main.check_email'))
-            
-            flash('Payment verified.', 'success')
-            return redirect(url_for('main.index'))
+            flash('Payment was not successful.', 'error')
+            return redirect(url_for('main.pricing'))
 
     except Exception as e:
-        print(f"Callback Error: {e}")
+        print(f"Payment Callback Error: {e}")
         flash('An error occurred verifying payment.', 'error')
         return redirect(url_for('main.index'))
+
+    return redirect(url_for('main.index'))
 
 
 @bp.route('/check-email')

@@ -19,11 +19,8 @@ class Tenant(db.Model):
     paystack_reference = db.Column(db.String(100), unique=True, nullable=True)
     is_active = db.Column(db.Boolean, default=False, nullable=False) 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
     verification_status = db.Column(db.String(20), default='unverified', nullable=False)
-    
     compliance_docs = db.Column(JSON, nullable=True)
-    
     admin_notes = db.Column(db.Text, nullable=True)
 
     # --- Relationships ---
@@ -166,7 +163,7 @@ class QuoteRequest(db.Model):
 
 class Quote(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    quote_number = db.Column(db.String(20), unique=True, nullable=False)
+    quote_number = db.Column(db.String(20), nullable=False)
     quote_date = db.Column(db.Date, nullable=False, default=date.today)
     expiry_date = db.Column(db.Date)
     subtotal = db.Column(db.Float, default=0.0)
@@ -187,13 +184,14 @@ class Quote(db.Model):
     registration_number = db.Column(db.String(100), nullable=True)
     terms_and_conditions = db.Column(db.Text, nullable=True)
 
-    # --- MODIFIED: Changed backref to back_populates ---
     user = db.relationship('User', back_populates='quotes')
     
-    # --- NEW TENANCY FIELDS ---
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
     tenant = db.relationship('Tenant', back_populates='quotes')
-    # --- END NEW TENANCY FIELDS ---
+
+    __table_args__ = (
+        db.UniqueConstraint('tenant_id', 'quote_number', name='_tenant_quote_uc'),
+    )
 
 class QuoteLineItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -210,7 +208,7 @@ class QuoteLineItem(db.Model):
 
 class Invoice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    invoice_number = db.Column(db.String(20), unique=True, nullable=False)
+    invoice_number = db.Column(db.String(20), nullable=False)
     invoice_date = db.Column(db.Date, nullable=False, default=date.today)
     due_date = db.Column(db.Date)
     subtotal = db.Column(db.Float, default=0.0)
@@ -222,15 +220,16 @@ class Invoice(db.Model):
     payment_reference = db.Column(db.String(100), unique=True, nullable=True)
     payment_token = db.Column(db.String(100), unique=True, nullable=True)
     
-    # --- MODIFIED: Changed relationships ---
     client = db.relationship('User', overlaps="invoices,user", foreign_keys=[user_id]) # Kept your overlaps
     user = db.relationship('User', back_populates='invoices', foreign_keys=[user_id]) # Added back_populates
     line_items = db.relationship('InvoiceLineItem', back_populates='invoice', lazy=True, cascade="all, delete-orphan")
     
-    # --- NEW TENANCY FIELDS ---
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
     tenant = db.relationship('Tenant', back_populates='invoices')
-    # --- END NEW TENANCY FIELDS ---
+
+    __table_args__ = (
+        db.UniqueConstraint('tenant_id', 'invoice_number', name='_tenant_invoice_uc'),
+    )
 
 class InvoiceLineItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -323,15 +322,17 @@ class StaffApplication(db.Model):
 
 class ServiceCategory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False, unique=True)
+    name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True)
     calculation_method = db.Column(db.String(50), nullable=False, default='options')
     items = db.relationship('ServiceItem', back_populates='category', lazy=True, cascade="all, delete-orphan")
 
-    # --- NEW TENANCY FIELDS ---
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
     tenant = db.relationship('Tenant', back_populates='service_categories')
-    # --- END NEW TENANCY FIELDS ---
+
+    __table_args__ = (
+        db.UniqueConstraint('tenant_id', 'name', name='_tenant_category_uc'),
+    )
 
 class ServiceItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -435,26 +436,36 @@ class Settings(db.Model):
 
 
 # --- Helper Functions ---
-def get_next_quote_number():
-    # This will need to be made tenant-aware in Phase 3
-    last_quote = Quote.query.order_by(Quote.id.desc()).first()
+def get_next_quote_number(tenant_id):
+    """
+    Generates a sequential quote number specific to the provided tenant.
+    """
+    # Filter by tenant_id to ensure sequence is local to the business
+    last_quote = Quote.query.filter_by(tenant_id=tenant_id).order_by(Quote.id.desc()).first()
+    
     if not last_quote or '-' not in last_quote.quote_number:
-        return "QU-0051"
+        return "QU-0001" # Resetting to 0001 makes more sense for a new tenant than 0051
+    
     try:
+        # Extract the numeric part
         last_num = int(last_quote.quote_number.split('-')[1])
         new_num = last_num + 1
         return f"QU-{new_num:04d}"
     except (IndexError, ValueError):
-        return "QU-0051"
+        return "QU-0001"
 
-def get_next_invoice_number():
-    # This will need to be made tenant-aware in Phase 3
-    last_invoice = Invoice.query.order_by(Invoice.id.desc()).first()
+def get_next_invoice_number(tenant_id):
+    """
+    Generates a sequential invoice number specific to the provided tenant.
+    """
+    last_invoice = Invoice.query.filter_by(tenant_id=tenant_id).order_by(Quote.id.desc()).first()
+    
     if not last_invoice or '-' not in last_invoice.invoice_number:
-        return "INV-0061"
+        return "INV-0001"
+        
     try:
         last_num = int(last_invoice.invoice_number.split('-')[1])
         new_num = last_num + 1
         return f"INV-{new_num:04d}"
     except (IndexError, ValueError):
-        return "INV-0061"
+        return "INV-0001"

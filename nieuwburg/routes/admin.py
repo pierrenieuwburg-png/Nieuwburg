@@ -116,6 +116,49 @@ def setup_wizard():
     """
     return render_template('admin/setup_wizard.html', business_name=current_user.tenant.business_name)
 
+@bp.route('/verify', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def verification_upload():
+    tenant = current_user.tenant
+    
+    if request.method == 'POST':
+        # 1. Handle File Uploads
+        uploaded_files = {}
+        
+        # Define expected fields (you can make this dynamic based on industry later)
+        doc_types = ['trade_certificate', 'business_registration', 'liability_insurance']
+        
+        files_found = False
+        for doc_field in doc_types:
+            file = request.files.get(doc_field)
+            if file and file.filename != '':
+                filename = secure_filename(f"{tenant.id}_{doc_field}_{file.filename}")
+                save_path = os.path.join(current_app.config['UPLOAD_FOLDER'], 'compliance', filename)
+                
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                
+                file.save(save_path)
+                uploaded_files[doc_field] = filename
+                files_found = True
+        
+        if not files_found:
+            flash("Please upload at least one document.", "error")
+            return redirect(request.url)
+
+        # 2. Update Tenant Status
+        tenant.compliance_docs = uploaded_files # Save paths to DB
+        tenant.verification_status = 'pending'  # Lock them in pending mode
+        db.session.commit()
+        
+        # 3. Log & Notify
+        log_activity('Verification Submitted', f"Tenant {tenant.business_name} submitted docs for review.")
+        flash("Documents submitted successfully! We will review them shortly.", "success")
+        return redirect(url_for('admin.admin_spa_shell', path='dashboard'))
+
+    return render_template('admin/verification_upload.html', tenant=tenant)
+
 # --- SPA Catch-All Route ---
 # Catches all other /admin/* routes and serves the React App
 @bp.route('/', defaults={'path': ''})

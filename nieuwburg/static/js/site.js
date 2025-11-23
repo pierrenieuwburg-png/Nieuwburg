@@ -22,82 +22,66 @@ const serviceDetails = {
 
 // --- NEW REUSABLE PASSWORD VALIDATOR FUNCTION ---
 function initializePasswordValidator() {
-    const passInput = document.getElementById('register-password');
-    if (!passInput) return; // Don't run if the element isn't on the page
-
-    const confirmPassInput = document.getElementById('register-confirm-password');
-    const reqs = {
-        length: document.getElementById('req-length'),
-        upper: document.getElementById('req-upper'),
-        lower: document.getElementById('req-lower'),
-        num: document.getElementById('req-num'),
-        special: document.getElementById('req-special')
-    };
+    // We check for 'reg-password' (from the new HTML) OR 'register-password' (legacy)
+    const passInput = document.getElementById('reg-password') || document.getElementById('register-password');
+    const confirmPassInput = document.getElementById('reg-password-confirm') || document.getElementById('register-confirm-password');
     
-    const validations = {
-        length: val => val.length >= 8,
-        upper: val => /[A-Z]/.test(val),
-        lower: val => /[a-z]/.test(val),
-        num: val => /[0-9]/.test(val),
-        special: val => /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(val)
-    };
+    // If elements aren't found, stop here to avoid errors
+    if (!passInput) return;
 
-    if (passInput && confirmPassInput) {
-        passInput.addEventListener('input', () => {
-            const passValue = passInput.value;
-            let allValid = true;
+    const strengthBar = document.getElementById('strength-bar');
+    const strengthText = document.getElementById('strength-text');
+    const matchText = document.getElementById('match-text');
 
-            for (const [key, validator] of Object.entries(validations)) {
-                const reqItem = reqs[key];
-                if (validator(passValue)) {
-                    reqItem.classList.add('valid');
-                    reqItem.querySelector('i').className = 'fa-solid fa-circle-check';
-                } else {
-                    reqItem.classList.remove('valid');
-                    reqItem.querySelector('i').className = 'fa-solid fa-circle-xmark';
-                    allValid = false;
-                }
-            }
-            
-            if (allValid) {
-                passInput.classList.remove('invalid-input');
-                passInput.classList.add('valid-input');
-            } else {
-                passInput.classList.remove('valid-input');
-                passInput.classList.add('invalid-input');
-            }
-            validateConfirmPassword();
-        });
+    // 1. Password Strength Logic
+    passInput.addEventListener('input', function() {
+        const val = passInput.value;
+        let strength = 0;
+        let msg = "";
+        let color = '#e2e8f0'; 
+        let width = '0%';
 
-        confirmPassInput.addEventListener('input', validateConfirmPassword);
+        if (val.length >= 8) strength++;
+        if (val.match(/[A-Z]/)) strength++;
+        if (val.match(/[0-9]/)) strength++;
+        if (val.match(/[^a-zA-Z0-9]/)) strength++;
+
+        // Determine Level
+        switch(strength) {
+            case 0: width = '10%'; msg = "Too short"; break;
+            case 1: width = '25%'; color = '#ef4444'; msg = "Weak"; break; // Red
+            case 2: width = '50%'; color = '#f59e0b'; msg = "Fair"; break; // Orange
+            case 3: width = '75%'; color = '#3b82f6'; msg = "Good"; break; // Blue
+            case 4: width = '100%'; color = '#10b981'; msg = "Strong"; break; // Green
+        }
+
+        // Update UI
+        if(strengthBar) {
+            strengthBar.style.width = width;
+            strengthBar.style.backgroundColor = color;
+        }
+        if(strengthText) {
+            strengthText.textContent = msg;
+            strengthText.style.color = color;
+        }
         
-        function validateConfirmPassword() {
-            const passValue = passInput.value;
-            const confirmValue = confirmPassInput.value;
-            
-            if (confirmValue.length > 0 && passValue === confirmValue && validations.length(passValue)) {
-                passInput.classList.add('valid-input');
-                confirmPassInput.classList.add('valid-input');
-                passInput.classList.remove('invalid-input');
-                confirmPassInput.classList.remove('invalid-input');
-                
-                if (!confirmPassInput.classList.contains('matched')) {
-                     passInput.classList.add('flash-success');
-                     confirmPassInput.classList.add('flash-success');
-                     setTimeout(() => {
-                         passInput.classList.remove('flash-success');
-                         confirmPassInput.classList.remove('flash-success');
-                     }, 800);
-                }
-                confirmPassInput.classList.add('matched');
+        // Re-check match when password changes
+        if(confirmPassInput) validateMatch();
+    });
 
-            } else if (confirmValue.length > 0) {
-                confirmPassInput.classList.add('invalid-input');
-                confirmPassInput.classList.remove('valid-input');
-                confirmPassInput.classList.remove('matched');
-            } else {
-                confirmPassInput.className = '';
-            }
+    // 2. Password Match Logic
+    if (confirmPassInput) {
+        confirmPassInput.addEventListener('input', validateMatch);
+    }
+
+    function validateMatch() {
+        if (!confirmPassInput || !matchText) return;
+        
+        if (confirmPassInput.value && passInput.value !== confirmPassInput.value) {
+            matchText.style.display = 'block';
+            matchText.textContent = "Passwords do not match";
+        } else {
+            matchText.style.display = 'none';
         }
     }
 }
@@ -493,149 +477,312 @@ document.querySelectorAll('a[href^="/#"]').forEach(anchor => {
     });
   }
 
-  // --- NEW: Auth Modal and Password Validation ---
+  document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('password-toggle-icon')) {
+            e.preventDefault();
+            const targetId = e.target.getAttribute('data-target');
+            const input = document.getElementById(targetId);
+            if (input) {
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    e.target.classList.remove('fa-eye');
+                    e.target.classList.add('fa-eye-slash');
+                } else {
+                    input.type = 'password';
+                    e.target.classList.remove('fa-eye-slash');
+                    e.target.classList.add('fa-eye');
+                }
+            }
+        }
+    });
+
+    // 2. Auth Modal Specific Logic
     const authModal = document.getElementById('auth-modal');
     if (authModal) {
-        const openBtn = document.getElementById('login-nav-btn');
+        const openBtns = document.querySelectorAll('#login-nav-btn, .open-auth-modal');
         const closeBtn = document.getElementById('close-auth-modal-button');
+        
+        // View Elements
+        const formsView = document.getElementById('auth-forms-view');
+        const forgotView = document.getElementById('auth-forgot-view');
+        const successView = document.getElementById('auth-success-view');
+
+        // Tab Logic
         const tabLinks = document.querySelectorAll('.auth-tab-link');
         const forms = document.querySelectorAll('.auth-form-modal');
-        const switchToRegister = document.querySelector('.switch-to-register');
-        const switchToLogin = document.querySelector('.switch-to-login');
-
-    async function handleLoginSubmit(e) {
-    e.preventDefault();
-    const form = e.target;
-    const errorMessageDiv = document.getElementById('login-error-message');
-    const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
-
-    errorMessageDiv.style.display = 'none';
-
-    try {
-        const response = await fetch(form.action, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRFToken': data.csrf_token
-            },
-            body: JSON.stringify(data)
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-            window.location.href = result.redirect;
-        } else {
-            errorMessageDiv.className = 'flash error';
-            
-            if (result.status === 'locked') {
-                errorMessageDiv.textContent = result.message;
-
-            } else if (result.status === 'unconfirmed') {
-                errorMessageDiv.innerHTML = `
-                    ${result.message} 
-                    <a href="/resend-confirmation/${result.email}" style="font-weight: bold; color: #721c24; text-decoration: underline;">
-                        Resend Confirmation Email
-                    </a>
-                `;
-            } else {
-                // For regular errors like wrong password
-                errorMessageDiv.textContent = result.message;
-            }
-            errorMessageDiv.style.display = 'block';
-        }
-    } catch (error) {
-        console.error('Login error:', error);
-        errorMessageDiv.textContent = 'A network error occurred. Please try again.';
-        errorMessageDiv.style.display = 'block';
-    }
-}
-
-async function handleRegisterSubmit(e) {
-    e.preventDefault();
-    const form = e.target;
-    const errorMessageDiv = document.getElementById('register-error-message');
-    const successMessageDiv = document.getElementById('login-error-message'); // Reuse login div for success
-    const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
-
-    errorMessageDiv.style.display = 'none';
-    successMessageDiv.style.display = 'none';
-
-    try {
-        const response = await fetch(form.action, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRFToken': data.csrf_token
-            },
-            body: JSON.stringify(data)
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-            // Switch to login tab and show success message
-            document.querySelector('[data-target-form="login-form-modal"]').click();
-            successMessageDiv.textContent = result.message;
-            successMessageDiv.style.backgroundColor = '#d4edda'; // Green for success
-            successMessageDiv.style.color = '#155724';
-            successMessageDiv.style.display = 'block';
-        } else {
-            errorMessageDiv.textContent = result.message;
-            errorMessageDiv.style.display = 'block';
-        }
-    } catch (error) {
-        console.error('Registration error:', error);
-        errorMessageDiv.textContent = 'A network error occurred. Please try again.';
-        errorMessageDiv.style.display = 'block';
-    }
-}
-        function showForm(targetId) {
-        forms.forEach(form => form.classList.remove('active'));
-        tabLinks.forEach(tab => tab.classList.remove('active'));
-        document.getElementById(targetId).classList.add('active');
-        document.querySelector(`[data-target-form="${targetId}"]`).classList.add('active');
-    }
-
-    const openModal = () => {
-        authModal.classList.add('visible');
-        showForm('login-form-modal');
-    };
-    const closeModal = () => authModal.classList.remove('visible');
-
-    if (openBtn) openBtn.addEventListener('click', openModal);
-    if (closeBtn) closeBtn.addEventListener('click', closeModal);
-    authModal.addEventListener('click', (e) => {
-        if (e.target === authModal) closeModal();
-    });
-
-    tabLinks.forEach(tab => {
-        tab.addEventListener('click', () => showForm(tab.dataset.targetForm));
-    });
-
-    if (switchToRegister) switchToRegister.addEventListener('click', (e) => {
-        e.preventDefault();
-        showForm('register-form-modal');
-    });
-    if (switchToLogin) switchToLogin.addEventListener('click', (e) => {
-        e.preventDefault();
-        showForm('login-form-modal');
-    });
-
-    const loginForm = document.getElementById('login-form-modal');
-    const registerForm = document.getElementById('register-form-modal');
-    
-    // Attach listeners now that functions are defined in this scope
-    if (loginForm) loginForm.addEventListener('submit', handleLoginSubmit);
-    if (registerForm) registerForm.addEventListener('submit', handleRegisterSubmit);
-    
-    // --- Password Real-time Validation ---
-    initializePasswordValidator();
         
+        function switchTab(targetId) {
+            tabLinks.forEach(t => t.classList.remove('active'));
+            const activeTab = document.querySelector(`.auth-tab-link[data-target-form="${targetId}"]`);
+            if(activeTab) activeTab.classList.add('active');
+
+            forms.forEach(f => f.classList.remove('active'));
+            const targetForm = document.getElementById(targetId);
+            if(targetForm) targetForm.classList.add('active');
+        }
+
+        tabLinks.forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                e.preventDefault();
+                switchTab(tab.dataset.targetForm);
+            });
+        });
+
+        // Open/Close & View Switching Logic
+        const showView = (viewId) => {
+            if(formsView) formsView.style.display = 'none';
+            if(forgotView) forgotView.style.display = 'none';
+            if(successView) successView.style.display = 'none';
+            
+            const target = document.getElementById(viewId);
+            if(target) target.style.display = 'block';
+        };
+
+        const openModal = (e) => {
+            if(e) e.preventDefault();
+            authModal.classList.add('modal-open');
+            showView('auth-forms-view'); // Default to forms
+            switchTab('login-form-modal'); // Default to login tab
+        };
+        const closeModal = () => authModal.classList.remove('modal-open');
+
+        openBtns.forEach(btn => btn.addEventListener('click', openModal));
+        if (closeBtn) closeBtn.addEventListener('click', closeModal);
+        authModal.addEventListener('click', (e) => { if (e.target === authModal) closeModal(); });
+
+        // --- FORGOT PASSWORD FLOW ---
+        const forgotLink = document.getElementById('forgot-password-link');
+        const backToLogin = document.getElementById('back-to-login-link');
+        const forgotForm = document.getElementById('forgot-password-form');
+        const successCloseBtn = document.getElementById('success-close-btn');
+
+        if(forgotLink) forgotLink.onclick = (e) => { e.preventDefault(); showView('auth-forgot-view'); };
+        if(backToLogin) backToLogin.onclick = (e) => { e.preventDefault(); showView('auth-forms-view'); };
+        if(successCloseBtn) successCloseBtn.onclick = closeModal;
+
+        if (forgotForm) {
+            forgotForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const btn = document.getElementById('forgot-btn');
+                const errDiv = document.getElementById('forgot-error-message');
+                const email = document.getElementById('forgot-email').value;
+                const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+                btn.disabled = true;
+                btn.textContent = "Sending...";
+                errDiv.style.display = 'none';
+
+                try {
+                    const res = await fetch('/auth/request-password-reset', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': csrfToken
+                        },
+                        body: JSON.stringify({ email: email })
+                    });
+                    const data = await res.json();
+
+                    if (res.ok) {
+                        document.getElementById('success-title').textContent = "Check Your Email";
+                        document.getElementById('success-message').textContent = data.message;
+                        document.getElementById('resend-container').style.display = 'none';
+                        document.getElementById('success-close-btn').style.display = 'inline-block';
+                        showView('auth-success-view');
+                    } else {
+                        errDiv.textContent = data.message;
+                        errDiv.style.display = 'block';
+                    }
+                } catch (err) {
+                    errDiv.textContent = "System error. Please try again.";
+                    errDiv.style.display = 'block';
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = "Send Instructions";
+                }
+            });
+        }
+
+        // --- HELPER: Post Data ---
+        async function postFormData(url, formData) {
+            const data = Object.fromEntries(formData.entries());
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': data.csrf_token || ''
+                },
+                body: JSON.stringify(data)
+            });
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+                return { ok: response.ok, json: await response.json() };
+            }
+            throw new Error("Server Error");
+        }
+
+        // --- LOGIN SUBMIT ---
+        const loginForm = document.getElementById('login-form-modal');
+        if (loginForm) {
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const errDiv = document.getElementById('login-error-message');
+                const btn = loginForm.querySelector('button[type="submit"]');
+                errDiv.style.display = 'none';
+                btn.textContent = "Logging in...";
+                btn.disabled = true;
+
+                try {
+                    const { ok, json } = await postFormData(loginForm.action, new FormData(loginForm));
+                    if (ok) {
+                        window.location.href = json.redirect || '/client/dashboard';
+                    } else {
+                        errDiv.innerHTML = json.message;
+                        errDiv.style.display = 'block';
+                    }
+                } catch (err) {
+                    errDiv.textContent = "System error.";
+                    errDiv.style.display = 'block';
+                } finally {
+                    btn.textContent = "Log In";
+                    btn.disabled = false;
+                }
+            });
+        }
+
+        // --- REGISTER SUBMIT ---
+        const registerForm = document.getElementById('register-form-modal');
+        if (registerForm) {
+            registerForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const errDiv = document.getElementById('register-error-message');
+                const btn = document.getElementById('register-btn');
+                const pass = document.getElementById('register-password').value;
+                const confirm = document.getElementById('register-password-confirm').value;
+
+                if (pass !== confirm) {
+                    document.getElementById('match-text').style.display = 'block';
+                    return;
+                }
+                if (document.querySelectorAll('.password-requirements li.invalid').length > 0) {
+                    errDiv.textContent = "Please meet all password requirements.";
+                    errDiv.style.display = 'block';
+                    return;
+                }
+
+                errDiv.style.display = 'none';
+                btn.textContent = "Creating Account...";
+                btn.disabled = true;
+
+                try {
+                    const formData = new FormData(registerForm);
+                    const { ok, json } = await postFormData(registerForm.action, formData);
+                    
+                    if (ok) {
+                        document.getElementById('success-title').textContent = "Verify Your Email";
+                        document.getElementById('success-message').textContent = "Please check your email, confirm by clicking the link and let's get you setup and ready to book a blitz pro.";
+                        
+                        const resendContainer = document.getElementById('resend-container');
+                        resendContainer.style.display = 'block';
+                        document.getElementById('success-email-display').textContent = formData.get('email');
+                        document.getElementById('success-close-btn').style.display = 'none';
+
+                        showView('auth-success-view');
+                        
+                        const resendBtn = document.getElementById('resend-email-btn');
+                        const resendMsg = document.getElementById('resend-message');
+                        
+                        resendBtn.onclick = async () => {
+                            resendBtn.textContent = "Sending...";
+                            resendBtn.disabled = true;
+                            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+                            try {
+                                const res = await fetch('/auth/resend-confirmation', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-CSRFToken': csrfToken 
+                                    },
+                                    body: JSON.stringify({ email: formData.get('email') })
+                                });
+                                const resData = await res.json();
+                                resendMsg.textContent = resData.message;
+                                resendMsg.style.color = res.ok ? '#10b981' : '#dc3545';
+                            } catch (error) {
+                                resendMsg.textContent = "Error sending email.";
+                                resendMsg.style.color = '#dc3545';
+                            } finally {
+                                resendBtn.textContent = "Resend Email";
+                                resendBtn.disabled = false;
+                            }
+                        };
+
+                    } else {
+                        errDiv.textContent = json.message;
+                        errDiv.style.display = 'block';
+                        btn.textContent = "Create Account";
+                        btn.disabled = false;
+                    }
+                } catch (err) {
+                    errDiv.textContent = "System error.";
+                    errDiv.style.display = 'block';
+                    btn.textContent = "Create Account";
+                    btn.disabled = false;
+                }
+            });
+        }
+
+        // --- PASSWORD VALIDATION LOGIC (Green Glow) ---
+        const regPass = document.getElementById('register-password');
+        const regConfirm = document.getElementById('register-password-confirm');
+        
+        if (regPass) {
+            regPass.addEventListener('input', function() {
+                const val = this.value;
+                const reqs = {
+                    length: val.length >= 8,
+                    upper: /[A-Z]/.test(val),
+                    lower: /[a-z]/.test(val),
+                    number: /[0-9]/.test(val),
+                    special: /[^a-zA-Z0-9]/.test(val)
+                };
+                let allValid = true;
+                for (const [key, isValid] of Object.entries(reqs)) {
+                    const el = document.getElementById(`req-${key}`);
+                    if (el) {
+                        if (isValid) { el.classList.add('valid'); el.classList.remove('invalid'); }
+                        else { el.classList.remove('valid'); el.classList.add('invalid'); allValid = false; }
+                    }
+                }
+                if (allValid) this.classList.add('valid-input'); else this.classList.remove('valid-input');
+                if (regConfirm && regConfirm.value) checkMatch();
+            });
+        }
+
+        if (regConfirm) {
+            regConfirm.addEventListener('input', checkMatch);
+        }
+
+        function checkMatch() {
+            const matchText = document.getElementById('match-text');
+            if (regPass.value && regPass.value === regConfirm.value) {
+                matchText.style.display = 'none';
+                regConfirm.classList.add('valid-input'); 
+                regConfirm.classList.remove('invalid-input');
+            } else {
+                if (regConfirm.value.length > 0) {
+                    matchText.style.display = 'block';
+                    regConfirm.classList.remove('valid-input');
+                    regConfirm.classList.add('invalid-input'); 
+                } else {
+                    matchText.style.display = 'none';
+                    regConfirm.classList.remove('valid-input');
+                    regConfirm.classList.remove('invalid-input');
+                }
+            }
+        }
     }
     // --- Handle Redirects to Auth Modal ---
     const urlParams = new URLSearchParams(window.location.search);

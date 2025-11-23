@@ -2530,58 +2530,74 @@ def initiate_subscription():
     email = data.get('email')
     full_name = data.get('full_name')
     business_name = data.get('business_name')
+    industry = data.get('industry')
     plan_type = data.get('plan_type')
     password = data.get('password')
 
-    # 1. RECEIVE DATA & VALIDATE
+    # 1. VALIDATION
     if not all([email, full_name, business_name, plan_type, password]):
         return jsonify({'message': 'Missing required fields'}), 400
 
     if plan_type not in PLAN_PRICES:
         return jsonify({'message': 'Invalid plan type'}), 400
 
-    # 2. VALIDATE: Check if user already exists
-    existing_user = User.query.filter_by(email=email).first()
-    if existing_user:
-        return jsonify({'message': 'An account with this email already exists.'}), 409 
-
     amount_in_cents = PLAN_PRICES[plan_type]
-    
-    # 4. GENERATE REFERENCE
     paystack_ref = str(uuid.uuid4())
 
     try:
-        # 3. CREATE (INACTIVE) RECORDS
+        # 2. CHECK FOR EXISTING USER
+        user = User.query.filter_by(email=email).first()
         
+        # If user exists, we check credentials and eligibility to upgrade
+        if user:
+            # A. Verify Password (Security Check)
+            if not user.check_password(password):
+                return jsonify({'message': 'Account exists. Please enter the correct password to upgrade your account.'}), 401
+            
+            # B. Check if they are ALREADY a provider (Prevent double-business ownership for now)
+            if user.role == 'admin' and user.tenant_id:
+                return jsonify({'message': 'This email is already registered as a Service Provider.'}), 409
+            
+            # C. Prepare to UPGRADE this user
+            # We do not create a new user object. We will link this one.
+            
+        else:
+            # D. Create NEW User
+            user = User(
+                email=email,
+                role='admin', # Will be set to admin immediately
+                is_confirmed=False, 
+                # tenant_id will be set below
+            )
+            user.set_password(password)
+            db.session.add(user)
+            db.session.flush() # Flush to get ID
+
+            # Create Profile for new user
+            new_profile = Profile(
+                user_id=user.id,
+                full_name=full_name
+            )
+            db.session.add(new_profile)
+
+        # 3. CREATE THE TENANT (Business)
         new_tenant = Tenant(
             business_name=business_name,
             subscription_plan=plan_type,
             paystack_reference=paystack_ref,
-            is_active=False 
+            is_active=False # Inactive until payment
         )
         db.session.add(new_tenant)
-        db.session.flush() 
+        db.session.flush() # Flush to get ID
 
-        new_user = User(
-            email=email,
-            role='admin', 
-            is_confirmed=False, 
-            tenant_id=new_tenant.id 
-        )
-        new_user.set_password(password)
-        db.session.add(new_user)
-        db.session.flush() 
-
-        new_profile = Profile(
-            user_id=new_user.id,
-            full_name=full_name,
-            tenant_id=new_tenant.id 
-        )
-        db.session.add(new_profile)
+        # 4. LINK USER TO TENANT & UPGRADE ROLE
+        user.tenant_id = new_tenant.id
+        user.role = 'admin' 
         
+        # Update/Create Settings
         new_settings = BusinessSettings(
             tenant_id=new_tenant.id,
-            business_name=business_name 
+            business_name=business_name
         )
         db.session.add(new_settings)
 
@@ -2607,8 +2623,9 @@ def initiate_subscription():
             "metadata": {
                 "full_name": full_name,
                 "business_name": business_name,
+                "industry": industry,
                 "plan_type": plan_type,
-                "user_id": new_user.id, 
+                "user_id": user.id, 
                 "tenant_id": new_tenant.id 
             }
         }
