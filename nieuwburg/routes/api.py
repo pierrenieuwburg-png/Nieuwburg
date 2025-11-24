@@ -44,107 +44,68 @@ def nl2br(value):
 def api_add_client():
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
-
     data = request.json
     form = AddClientForm(data=data) 
-
     if form.validate():
-        # Check if email exists globally (Constraint: User emails must be unique across the platform)
-        if User.query.filter_by(email=form.email.data).first():
-            return jsonify({'message': 'A user with this email already exists in the system.'}), 400
-
-        try:
-            new_client = User(
-                email=form.email.data,
-                role='client',
-                is_confirmed=True,
-                tenant_id=current_user.tenant_id  # <--- TENANT AWARE
-            )
-            temp_password = secrets.token_urlsafe(12)
-            new_client.set_password(temp_password)
-
-            new_profile = Profile(
-                user=new_client,
-                full_name=form.full_name.data,
-                phone_number=form.phone_number.data,
-                address=form.address.data,
-                tenant_id=current_user.tenant_id # <--- TENANT AWARE
-            )
-
-            db.session.add(new_client)
-            db.session.add(new_profile)
+        email = form.email.data.lower().strip()
+        existing_user = User.query.filter_by(email=email).first()
+        
+        if existing_user:
+            existing_tenant_profile = Profile.query.filter_by(user_id=existing_user.id, tenant_id=current_user.tenant_id).first()
+            if existing_tenant_profile:
+                return jsonify({'message': 'This client is already in your list.'}), 409
+            
+            # Clone: Create new profile for tenant
+            new_tenant_profile = Profile(user_id=existing_user.id, full_name=form.full_name.data, phone_number=form.phone_number.data, address=form.address.data, tenant_id=current_user.tenant_id)
+            db.session.add(new_tenant_profile)
             db.session.commit()
-
-            log_activity('Client Created (API)', f"Admin '{current_user.email}' created client: {form.email.data}")
-
-            return jsonify({
-                'message': 'Client added successfully!',
-                'client': { 
-                    'id': new_client.id,
-                    'full_name': new_profile.full_name,
-                    'email': new_client.email,
-                    'phone_number': new_profile.phone_number, 
-                    'address': new_profile.address,
-                }
-             }), 201 
-
-        except Exception as e:
-            db.session.rollback()
-            print(f"Error adding client via API: {e}") 
-            return jsonify({'message': 'Database error occurred.'}), 500
-
+            log_activity('Client Added', f"Admin added existing user {email} to their client list.")
+            return jsonify({'message': 'Client added successfully!'}), 201
+        else:
+            try:
+                new_client = User(email=email, role='client', is_confirmed=True, tenant_id=None)
+                new_client.set_password(secrets.token_urlsafe(12))
+                db.session.add(new_client)
+                db.session.flush()
+                new_tenant_profile = Profile(user_id=new_client.id, full_name=form.full_name.data, phone_number=form.phone_number.data, address=form.address.data, tenant_id=current_user.tenant_id)
+                db.session.add(new_tenant_profile)
+                db.session.commit()
+                log_activity('Client Created', f"Admin created new client: {email}")
+                return jsonify({'message': 'Client added successfully!'}), 201 
+            except Exception as e:
+                db.session.rollback()
+                return jsonify({'message': 'Database error.'}), 500
     else:
-        errors = [f"{field}: {', '.join(error_list)}" for field, error_list in form.errors.items()]
-        return jsonify({'message': f"Validation failed: {'; '.join(errors)}"}), 400
+        return jsonify({'message': 'Validation failed'}), 400
     
 @bp.route('/admin/clients/<int:user_id>', methods=['PUT']) 
 @login_required
 def update_client_details(user_id):
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
-
-    # TENANT AWARE: Ensure we only find clients belonging to this tenant
-    client = User.query.options(joinedload(User.profile)).filter(
-        User.id == user_id, 
-        User.role == 'client',
-        User.tenant_id == current_user.tenant_id # <--- SECURITY CHECK
-    ).first()
-
-    if not client or not client.profile:
-        return jsonify({"message": "Client not found or permission denied"}), 404
-
+    profile = Profile.query.filter_by(user_id=user_id, tenant_id=current_user.tenant_id).first()
+    if not profile:
+        return jsonify({"message": "Client profile not found"}), 404
+    
     data = request.json
-    if not data:
-        return jsonify({"message": "No input data provided"}), 400
-
-    profile = client.profile
     profile.full_name = data.get('full_name', profile.full_name)
     profile.phone_number = data.get('phone_number', profile.phone_number)
     profile.address = data.get('address', profile.address)
     profile.service_frequency = data.get('service_frequency', profile.service_frequency)
-    
     service_fee_input = data.get('service_fee', profile.service_fee)
     try:
          profile.service_fee = float(service_fee_input) if service_fee_input not in [None, ''] else None
     except (ValueError, TypeError):
          profile.service_fee = profile.service_fee 
-
     profile.notes = data.get('notes', profile.notes)
 
     try:
         db.session.commit()
-        log_activity('Client Updated (API)', f"Admin '{current_user.email}' updated profile for {client.email}")
-
+        log_activity('Client Updated (API)', f"Admin '{current_user.email}' updated profile for {profile.user.email}")
         updated_data = get_client_details(user_id).get_json()
-
-        return jsonify({
-            "message": "Client profile updated successfully.",
-            "client": updated_data
-        })
-
+        return jsonify({"message": "Client profile updated.", "client": updated_data})
     except Exception as e:
         db.session.rollback()
-        print(f"Error updating client via API (User ID: {user_id}): {e}")
         return jsonify({'message': f'Database error occurred: {e}'}), 500
     
 @bp.route('/admin/dashboard-stats', methods=['GET'])
@@ -155,26 +116,31 @@ def get_dashboard_stats():
 
     try:
         today = date.today()
-        # TENANT AWARE: Filter all counts by tenant_id
+        
+        # 1. New Quotes (remains the same)
         new_quotes_count = QuoteRequest.query.filter_by(
-            status='New', 
+            status='Pending', # Changed from 'New' to 'Pending' to match likely status
             tenant_id=current_user.tenant_id
         ).count()
 
+        # 2. Upcoming Jobs (remains the same)
         upcoming_cleans_count = Job.query.filter(
             Job.scheduled_date >= today,
             Job.status.in_(['Scheduled', 'In-Progress']),
-            Job.tenant_id == current_user.tenant_id # <--- TENANT AWARE
+            Job.tenant_id == current_user.tenant_id
         ).count()
         
-        active_clients_count = User.query.filter_by(
-            role='client', 
-            tenant_id=current_user.tenant_id # <--- TENANT AWARE
+        # 3. FIX: Count PROFILES instead of USERS
+        # We join User to ensure we only count actual 'client' roles, not staff profiles
+        active_clients_count = Profile.query.join(User).filter(
+            User.role == 'client',
+            Profile.tenant_id == current_user.tenant_id
         ).count()
         
+        # 4. Staff Members (remains the same)
         staff_members_count = User.query.filter_by(
             role='staff', 
-            tenant_id=current_user.tenant_id # <--- TENANT AWARE
+            tenant_id=current_user.tenant_id
         ).count()
 
         stats_data = {
@@ -2240,36 +2206,22 @@ def api_send_invoice(invoice_id):
 def get_client_details(user_id):
     if not current_user.is_authenticated or current_user.role != 'admin':
         return jsonify({"message": "Permission denied"}), 403
-
     try:
-        # TENANT AWARE
-        client = User.query.options(joinedload(User.profile)).filter(
-            User.id == user_id, 
-            User.role == 'client',
-            User.tenant_id == current_user.tenant_id
-        ).first()
-
-        if not client:
-            return jsonify({"message": "Client not found"}), 404
-
-        profile_data = {}
-        if client.profile:
-            profile_data = {
-                "full_name": client.profile.full_name or 'N/A',
-                "phone_number": client.profile.phone_number or 'N/A',
-                "address": client.profile.address or 'N/A',
-                "service_frequency": client.profile.service_frequency or 'N/A',
-                "service_fee": client.profile.service_fee, 
-                "notes": client.profile.notes or '' 
-            }
-        else: 
-             profile_data = {
-                "full_name": 'N/A', "phone_number": 'N/A', "address": 'N/A',
-                "service_frequency": 'N/A', "service_fee": None, "notes": ''
-             }
-
-
-        bookings = QuoteRequest.query.filter_by(user_id=client.id).order_by(QuoteRequest.request_date.desc()).limit(10).all()
+        # FIX: Find specific profile for this tenant
+        profile = Profile.query.filter_by(user_id=user_id, tenant_id=current_user.tenant_id).first()
+        if not profile:
+            return jsonify({"message": "Client not found in your list"}), 404
+        
+        client = profile.user
+        profile_data = {
+            "full_name": profile.full_name or 'N/A',
+            "phone_number": profile.phone_number or 'N/A',
+            "address": profile.address or 'N/A',
+            "service_frequency": profile.service_frequency or 'N/A',
+            "service_fee": profile.service_fee, 
+            "notes": profile.notes or '' 
+        }
+        bookings = QuoteRequest.query.filter_by(user_id=client.id, tenant_id=current_user.tenant_id).order_by(QuoteRequest.request_date.desc()).limit(10).all()
         booking_history = [{
             "id": b.id,
             "request_date": b.request_date.strftime('%d %b %Y') if b.request_date else 'N/A',
@@ -2279,18 +2231,11 @@ def get_client_details(user_id):
             "service_frequency": b.service_frequency or 'N/A' 
         } for b in bookings]
 
-        client_data = {
-            "id": client.id,
-            "email": client.email,
-            "profile": profile_data,
-            "booking_history": booking_history 
-        }
+        client_data = {"id": client.id, "email": client.email, "profile": profile_data, "booking_history": booking_history}
         return jsonify(client_data)
-
     except Exception as e:
-        print(f"Error fetching client details for ID {user_id}: {e}")
         return jsonify({"message": "Error fetching client data."}), 500
-
+    
 @bp.route('/admin/clients/search')
 @login_required
 def search_clients():
@@ -2298,34 +2243,36 @@ def search_clients():
         return jsonify({"error": "Permission denied"}), 403
 
     query = request.args.get('q', '').strip().lower()
-    # TENANT AWARE
-    clients_query = User.query.outerjoin(User.profile).filter(
+    
+    # FIX: Query 'Profile' directly to ensure we ONLY get data for THIS tenant
+    # We join 'User' just to search by email if needed
+    profiles_query = Profile.query.join(User).filter(
         User.role == 'client',
-        User.tenant_id == current_user.tenant_id
+        Profile.tenant_id == current_user.tenant_id # STRICT TENANT FILTER
     )
 
     if query:
         search_term = f"%{query}%"
-        clients_query = clients_query.filter(
+        profiles_query = profiles_query.filter(
             or_(
                 User.email.ilike(search_term),
                 Profile.full_name.ilike(search_term)
             )
         )
 
-    clients = clients_query.order_by(Profile.full_name, User.email).all()
+    profiles = profiles_query.order_by(Profile.full_name, User.email).all()
+    
+    # Construct data strictly from the PROFILE object (Tenant's copy)
     clients_data = []
-    for client in clients:
-        full_name = client.profile.full_name if client.profile else 'N/A'
-        phone_number = client.profile.phone_number if client.profile else 'N/A'
-        address = client.profile.address if client.profile else 'N/A'
+    for profile in profiles:
         clients_data.append({
-            "id": client.id,
-            "full_name": full_name,
-            "email": client.email,
-            "phone_number": phone_number,
-            "address": address,
+            "id": profile.user_id, # Link to the User ID for clicking
+            "full_name": profile.full_name or 'N/A',
+            "email": profile.user.email,
+            "phone_number": profile.phone_number or 'N/A',
+            "address": profile.address or 'N/A',
         })
+        
     return jsonify(clients_data)
 
 @bp.route('/admin/staff/search')
@@ -2545,40 +2492,31 @@ def initiate_subscription():
     paystack_ref = str(uuid.uuid4())
 
     try:
-        # 2. CHECK FOR EXISTING USER
-        user = User.query.filter_by(email=email).first()
-        
-        # If user exists, we check credentials and eligibility to upgrade
-        if user:
-            # A. Verify Password (Security Check)
-            if not user.check_password(password):
-                return jsonify({'message': 'Account exists. Please enter the correct password to upgrade your account.'}), 401
-            
-            # B. Check if they are ALREADY a provider (Prevent double-business ownership for now)
-            if user.role == 'admin' and user.tenant_id:
-                return jsonify({'message': 'This email is already registered as a Service Provider.'}), 409
-            
-            # C. Prepare to UPGRADE this user
-            # We do not create a new user object. We will link this one.
-            
-        else:
-            # D. Create NEW User
-            user = User(
-                email=email,
-                role='admin', # Will be set to admin immediately
-                is_confirmed=False, 
-                # tenant_id will be set below
-            )
-            user.set_password(password)
-            db.session.add(user)
-            db.session.flush() # Flush to get ID
+        # 2. CHECK FOR EXISTING USER (Strict Separation)
+        existing_user = User.query.filter_by(email=email).first()
+    
+        if existing_user:
+        # BLOCK the upgrade with specific messaging
+            return jsonify({
+            'message': 'This email is already in use for a Personal account. Please use a different email address or your business email to register your company.'
+        }), 409
 
-            # Create Profile for new user
-            new_profile = Profile(
-                user_id=user.id,
-                full_name=full_name
-            )
-            db.session.add(new_profile)
+        # If we get here, it is a NEW user. Proceed to create.
+        user = User(
+            email=email,
+            role='admin', # Set directly to admin
+            is_confirmed=False, 
+        )
+        user.set_password(password)
+        db.session.add(user)
+        db.session.flush()
+
+        # Create Profile for new user
+        new_profile = Profile(
+            user_id=user.id,
+            full_name=full_name
+        )
+        db.session.add(new_profile)
 
         # 3. CREATE THE TENANT (Business)
         new_tenant = Tenant(
