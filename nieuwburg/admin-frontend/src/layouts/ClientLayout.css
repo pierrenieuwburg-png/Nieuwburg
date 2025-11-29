@@ -1,0 +1,29 @@
+.client-layout {
+  display: flex;
+  min-height: 100vh;
+  background-color: #f8f9fa;
+}
+
+.client-main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  transition: margin-left 0.3s ease;
+  min-width: 0; /* Prevents overflow issues */
+}
+
+/* Desktop: Push content when sidebar is open */
+@media (min-width: 769px) {
+  .client-main-content.sidebar-open {
+    margin-left: 260px;
+  }
+  .client-main-content.sidebar-closed {
+    margin-left: 80px; /* Collapsed width */
+  }
+}
+
+.client-page-container {
+  padding: 2rem;
+  flex: 1;
+  overflow-y: auto;
+}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 
+// Admin Components
 import Dashboard from './pages/Dashboard';
 import Applications from './pages/Applications';
 import Bookings from './pages/Bookings';
@@ -22,15 +23,27 @@ import EditQuote from './pages/EditQuote';
 import BusinessSettings from './pages/BusinessSettings';
 import SetupWizard from './pages/SetupWizard';
 
-// Placeholder for unmatched routes
-const NotFound = () => <h2>Admin Page Not Found</h2>;
+// --- NEW CLIENT IMPORTS ---
+import ClientLayout from './layouts/ClientLayout';
+import ClientHome from './pages/client/ClientHome';
 
-// Ensure NO inline const definitions exist for the imported components above
-// (e.g., no line like: const Bookings = () => <h2>...</h2>;)
+// Placeholder for future client pages (Bookings, Profile, etc.)
+const Placeholder = ({ title }) => (
+  <div style={{ padding: '3rem', textAlign: 'center', color: '#6b7280' }}>
+    <h2 style={{ marginBottom: '1rem', color: '#1f2937' }}>{title}</h2>
+    <p>This feature is coming in the next update.</p>
+  </div>
+);
+
+// Placeholder for unmatched routes
+const NotFound = () => <div style={{ padding: '2rem' }}><h2>Page Not Found</h2></div>;
 
 function App() {
   return (
     <Routes>
+      {/* =========================================
+          ADMIN ROUTES 
+         ========================================= */}
       <Route path="/" element={<Dashboard />} />
       <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/clients" element={<Clients />} />
@@ -49,11 +62,32 @@ function App() {
       <Route path="/services" element={<Services />} />
       <Route path="/blog" element={<Blog />} />
       <Route path="/activity-log" element={<ActivityLog />} />
-      <Route path="*" element={<NotFound />} />
       <Route path="/quotes/formal/:quoteId" element={<FormalQuoteDetail />} />
       <Route path="/quotes/edit/:quoteId" element={<EditQuote />} />
       <Route path="/settings" element={<BusinessSettings />} />
       <Route path="/setup-wizard" element={<SetupWizard />} />
+
+      {/* =========================================
+          CLIENT PORTAL ROUTES (New Layout)
+         ========================================= */}
+      <Route path="/client/dashboard" element={<ClientLayout />}>
+        
+        {/* Index matches exactly "/client/dashboard" */}
+        <Route index element={<ClientHome />} />
+        
+        {/* Sub-routes match "/client/dashboard/profile", etc. */}
+        <Route path="profile" element={<Placeholder title="My Profile" />} />
+        <Route path="bookings" element={<Placeholder title="My Bookings" />} />
+        <Route path="partners" element={<Placeholder title="BlitzPartners" />} />
+        <Route path="locations" element={<Placeholder title="My Locations" />} />
+        <Route path="payments" element={<Placeholder title="Payments & Wallets" />} />
+        <Route path="rewards" element={<Placeholder title="BlitzCoins & Rewards" />} />
+        <Route path="vouchers" element={<Placeholder title="Vouchers" />} />
+        
+      </Route>
+
+      {/* Fallback */}
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }

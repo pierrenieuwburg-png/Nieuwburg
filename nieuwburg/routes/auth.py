@@ -52,7 +52,7 @@ def send_email_async(msg):
 
 # --- AUTHENTICATION ROUTES ---
 
-@bp.route('/login', methods=['POST'])
+@bp.route('/login', methods=['GET', 'POST'])
 def login():
     """
     Traffic Cop Login: Authenticates user and directs them to the right dashboard.

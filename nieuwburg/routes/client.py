@@ -11,13 +11,9 @@ def check_client_access():
         return False
     return True
 
-@bp.route('/', defaults={'path': ''})
-@bp.route('/<path:path>')
-@login_required
-def client_spa_shell(path):
-    if not check_client_access():
-        return render_template('errors/403.html'), 403
-    return render_template('client/client_dashboard.html', user=current_user)
+# =========================================================
+# 1. API ROUTES (MUST COME FIRST)
+# =========================================================
 
 @bp.route('/api/dashboard', methods=['GET'])
 @login_required
@@ -33,9 +29,10 @@ def get_client_dashboard():
     ).count()
 
     # FIX: Only find PERSONAL profile (tenant_id is None)
+    # Uses a generator to find the first match safely
     personal_profile = next((p for p in current_user.profiles if p.tenant_id is None), None)
     
-    display_name = personal_profile.full_name if personal_profile else current_user.email
+    display_name = personal_profile.full_name if personal_profile else (current_user.email or "Neighbor")
     display_address = personal_profile.address if personal_profile else ""
 
     return jsonify({
@@ -57,6 +54,7 @@ def get_my_quotes():
     requests = QuoteRequest.query.filter_by(user_id=current_user.id).order_by(QuoteRequest.request_date.desc()).all()
     formal_quotes = Quote.query.filter_by(user_id=current_user.id).order_by(Quote.quote_date.desc()).all()
     combined_data = []
+    
     for r in requests:
         combined_data.append({
             "id": r.id, "type": "request", "display_id": f"REQ-{r.id}",
@@ -73,6 +71,7 @@ def get_my_quotes():
             "sort_date": q.quote_date.strftime('%Y-%m-%d') if q.quote_date else "",
             "status": q.status, "amount": q.total, "is_actionable": q.status == 'Sent'
         })
+    # Sort combined list by date
     combined_data.sort(key=lambda x: x['sort_date'], reverse=True)
     return jsonify(combined_data)
 
@@ -83,7 +82,6 @@ def get_my_invoices():
     invoices = Invoice.query.filter_by(user_id=current_user.id).order_by(Invoice.invoice_date.desc()).all()
     data = [{
         "id": inv.id, "number": inv.invoice_number,
-        "date": inv.invoice_date.strftime('%d %b %Y') if inv.invoice_date else "N/A",
         "due_date": inv.due_date.strftime('%d %b %Y') if inv.due_date else '-',
         "total": inv.total, "status": inv.status, "payment_token": inv.payment_token
     } for inv in invoices]
@@ -106,28 +104,13 @@ def get_my_bookings():
 @bp.route('/api/profile', methods=['POST'])
 @login_required
 def update_my_profile():
-    """
-    Updates ONLY the Client's PERSONAL profile.
-    """
     if not check_client_access(): return jsonify({"message": "Unauthorized"}), 403
-
     data = request.json
-    
-    # 1. Find PERSONAL Profile (tenant_id=None)
-    personal_profile = Profile.query.filter_by(
-        user_id=current_user.id, 
-        tenant_id=None 
-    ).first()
-    
-    # 2. If missing, create it.
+    personal_profile = Profile.query.filter_by(user_id=current_user.id, tenant_id=None).first()
     if not personal_profile:
-        personal_profile = Profile(
-            user_id=current_user.id, 
-            tenant_id=None # Explicitly personal
-        )
+        personal_profile = Profile(user_id=current_user.id, tenant_id=None)
         db.session.add(personal_profile)
     
-    # 3. Update fields on THIS profile only
     personal_profile.full_name = data.get('full_name', personal_profile.full_name)
     personal_profile.phone_number = data.get('phone_number', personal_profile.phone_number)
     personal_profile.address = data.get('address', personal_profile.address)
@@ -138,3 +121,16 @@ def update_my_profile():
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": "Error updating profile"}), 500
+
+# =========================================================
+# 2. SPA SHELL ROUTE (MUST COME LAST)
+# =========================================================
+# This catches everything else (like /client/dashboard) and serves the React App HTML
+
+@bp.route('/', defaults={'path': ''})
+@bp.route('/<path:path>')
+@login_required
+def client_spa_shell(path):
+    if not check_client_access():
+        return render_template('errors/403.html'), 403
+    return render_template('client/client_dashboard.html', user=current_user)

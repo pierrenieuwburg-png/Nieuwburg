@@ -1,0 +1,118 @@
+.client-top-header {
+  height: 70px;
+  background: white;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  padding: 0 2rem;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.mobile-menu-btn {
+  display: none; /* Hidden on desktop */
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #374151;
+}
+
+.header-spacer {
+  flex: 1;
+}
+
+/* Profile Circle */
+.header-profile-container {
+  position: relative;
+}
+
+.profile-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid #f3f4f6;
+  transition: border-color 0.2s;
+}
+
+.profile-circle:hover {
+  border-color: #d1d5db;
+}
+
+.profile-circle img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Dropdown */
+.profile-dropdown {
+  position: absolute;
+  top: 50px;
+  right: 0;
+  width: 200px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  border: 1px solid #f3f4f6;
+  padding: 0.5rem;
+  animation: fadeIn 0.1s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dropdown-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #f3f4f6;
+  margin-bottom: 0.5rem;
+}
+
+.dropdown-header strong {
+  display: block;
+  color: #111827;
+}
+
+.dropdown-header small {
+  color: #6b7280;
+}
+
+.dropdown-item {
+  display: block;
+  padding: 0.6rem 1rem;
+  color: #4b5563;
+  text-decoration: none;
+  font-size: 0.9rem;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.dropdown-item:hover {
+  background-color: #f9fafb;
+}
+
+.dropdown-divider {
+  height: 1px;
+  background-color: #f3f4f6;
+  margin: 0.5rem 0;
+}
+
+.dropdown-item.text-red {
+  color: #dc2626;
+}
+
+.dropdown-item.text-red:hover {
+  background-color: #fef2f2;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  .mobile-menu-btn {
+    display: block;
+  }
+}

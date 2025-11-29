@@ -2635,6 +2635,66 @@ def save_setup_wizard():
         traceback.print_exc()
         return jsonify({"message": f"An internal error occurred: {str(e)}"}), 500
     
+@bp.route('/services', methods=['GET'])
+def get_public_services():
+    """
+    Public endpoint to fetch service categories and items for the Booking Modal.
+    Uses the 'current_user' tenant if logged in, or defaults to the main tenant.
+    """
+    try:
+        # 1. Determine Tenant context
+        tenant_id = None
+        if current_user.is_authenticated and current_user.tenant_id:
+            tenant_id = current_user.tenant_id
+        else:
+            # Fallback: Fetch the first active tenant (The HQ)
+            # In a real multi-tenant app, you might determine this via subdomain
+            main_tenant = Tenant.query.filter_by(is_active=True).first()
+            if main_tenant:
+                tenant_id = main_tenant.id
+
+        if not tenant_id:
+            return jsonify([]) # No services available
+
+        # 2. Fetch Categories with Items
+        categories = ServiceCategory.query.options(
+            joinedload(ServiceCategory.items)
+        ).filter_by(
+            tenant_id=tenant_id
+        ).order_by(ServiceCategory.name).all()
+        
+        # 3. Format Data for site.js
+        categories_data = []
+        for category in categories:
+            items_data = []
+            for item in category.items:
+                items_data.append({
+                    'id': item.id,
+                    'name': item.name,
+                    'description': item.description,
+                    'estimated_time_mins': item.estimated_time_mins,
+                    'pricing_type': item.pricing_type,
+                    'default_rate': item.default_rate,
+                    'is_material': item.is_material,
+                    'is_variable_price': item.is_variable_price,
+                    # Retrieve prices for calculation
+                    'prices': [{'frequency': p.frequency, 'price': p.price} for p in item.prices] 
+                })
+            
+            categories_data.append({
+                'id': category.id,
+                'name': category.name,
+                'description': category.description,
+                'items': items_data,
+                'calculation_method': category.calculation_method
+            })
+            
+        return jsonify(categories_data)
+
+    except Exception as e:
+        print(f"Error fetching public services: {e}")
+        return jsonify({"message": "Error fetching service data."}), 500
+    
 @bp.route('/invoice/initiate-payment', methods=['POST'])
 def initiate_invoice_payment():
     """

@@ -1,159 +1,19 @@
-{% extends "dashboard_base.html" %} {# Changed to extend dashboard_base #}
+{% extends "base.html" %} 
+
 {% block title %}My Dashboard - Nieuwburg Blitz{% endblock %}
 
-{% block dashboard_content %} {# Changed block name #}
-    <div class="container">
-        <div class="dashboard-header">
-            <div class="header-text">
-                <h1>Welcome Back, {{ current_user.profile.full_name or current_user.email }}!</h1>
-                <p>Manage your bookings, quotes, and invoices all in one place.</p>
-            </div>
-            <div class="header-actions">
-                <a href="{{ url_for('auth.profile') }}" class="cta-outline">Edit Profile</a> {# Corrected url_for #}
-                <button class="cta" id="dashboard-quote-btn">Book a Service</button>
-            </div>
-        </div>
+{% block content %}
+    <div id="root" style="min-height: 100vh; background-color: #f8f9fa;"></div>
 
-        <div class="dashboard-tabs">
-            <button class="tab-link active" data-tab="upcoming">Upcoming</button>
-            <button class="tab-link" data-tab="quotes">Quotes & Invoices</button>
-            <button class="tab-link" data-tab="history">History</button>
-        </div>
+    <script type="module">
+        import RefreshRuntime from 'http://localhost:5173/@react-refresh'
+        RefreshRuntime.injectIntoGlobalHook(window)
+        window.$RefreshReg$ = () => {}
+        window.$RefreshSig$ = () => (type) => type
+        window.__vite_plugin_react_preamble_installed__ = true
+    </script>
 
-        <div class="tab-content">
-            <div class="tab-pane active" id="upcoming">
-                {% set upcoming_bookings = bookings | selectattr('status', 'in', ['Scheduled', 'In-Progress', 'Confirmed']) | list %}
-                {% if upcoming_bookings %}
-                    {% for booking in upcoming_bookings %}
-                        <div class="dashboard-card">
-                            <div class="card-body">
-                                <div class="card-info">
-                                    <span class="card-title">{{ booking.primary_service }}</span>
-                                    <span class="card-subtitle">Requested on: {{ booking.request_date.strftime('%d %b %Y') }}</span>
-                                </div>
-                                <div class="card-status">
-                                    <span class="status-badge status-{{ booking.status | lower }}">{{ booking.status }}</span>
-                                </div>
-                            </div>
-                        </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="empty-state">
-                        <h3>No Upcoming Bookings</h3>
-                        <p>You have no scheduled services. Ready to book your next clean?</p>
-                    </div>
-                {% endif %}
-            </div>
-
-            <div class="tab-pane" id="quotes">
-                {% if quotes or invoices %}
-                    {% for quote in quotes %}
-                    <div class="dashboard-card">
-                        <div class="card-body">
-                            <div class="card-info">
-                                <span class="card-title">Quote #{{ quote.quote_number }}</span>
-                                <span class="card-subtitle">Date: {{ quote.quote_date.strftime('%d %b %Y') }} | Total: R{{ "%.2f"|format(quote.total) }}</span>
-                            </div>
-                            <div class="card-status">
-                                <span class="status-badge status-{{ quote.status | lower }}">{{ quote.status }}</span>
-                            </div>
-                        </div>
-                        <div class="card-footer">
-                            {# Assuming these routes exist in 'main' or adjust as needed #}
-                            <a href="{{ url_for('main.client_download_quote_pdf', quote_id=quote.id) }}" class="cta-outline-small">Download PDF</a>
-                            {% if quote.status == 'Draft' %}
-                                <form action="{{ url_for('main.client_accept_quote', quote_id=quote.id) }}" method="POST" style="margin:0;">
-                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                     <button type="submit" class="cta-outline-small">Accept Quote</button>
-                                </form>
-                            {% elif quote.status == 'Accepted' and not quote.deposit_paid %}
-                                <a href="{{ url_for('main.pay_for_quote', token=quote.payment_token) }}" class="cta-small" style="background-color: #28a745;">Pay Deposit</a>
-                            {% endif %}
-                        </div>
-                    </div>
-                    {% endfor %}
-                    {% for invoice in invoices %}
-                    <div class="dashboard-card">
-                        <div class="card-body">
-                            <div class="card-info">
-                                <span class="card-title">Invoice #{{ invoice.invoice_number }}</span>
-                                <span class="card-subtitle">Date: {{ invoice.invoice_date.strftime('%d %b %Y') }} | Total: R{{ "%.2f"|format(invoice.total) }}</span>
-                            </div>
-                        </div>
-                        <div class="card-footer">
-                             {# Assuming this route exists in 'main' or adjust as needed #}
-                            <a href="{{ url_for('main.client_download_invoice_pdf', invoice_id=invoice.id) }}" class="cta-outline-small">Download PDF</a>
-                        </div>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                     <div class="empty-state">
-                        <h3>No Quotes or Invoices</h3>
-                        <p>Your financial documents will appear here once created.</p>
-                    </div>
-                {% endif %}
-            </div>
-
-            <div class="tab-pane" id="history">
-                 {% set past_bookings = bookings | selectattr('status', 'in', ['Completed', 'Cancelled']) | list %}
-                 {% if past_bookings %}
-                    {% for booking in past_bookings %}
-                        <div class="dashboard-card card-history">
-                            <div class="card-body">
-                                <div class="card-info">
-                                    <span class="card-title">{{ booking.primary_service }}</span>
-                                    <span class="card-subtitle">Requested on: {{ booking.request_date.strftime('%d %b %Y') }}</span>
-                                </div>
-                                <div class="card-status">
-                                    <span class="status-badge status-{{ booking.status | lower }}">{{ booking.status }}</span>
-                                </div>
-                            </div>
-                        </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="empty-state">
-                        <h3>No Booking History</h3>
-                        <p>Your past bookings will be shown here.</p>
-                    </div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-
-{% endblock %}
-
-{% block scripts %}
-{{ super() }}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const tabs = document.querySelectorAll('.tab-link');
-    const panes = document.querySelectorAll('.tab-pane');
-
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            const target = tab.getAttribute('data-tab');
-
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-
-            panes.forEach(pane => {
-                if (pane.id === target) {
-                    pane.classList.add('active');
-                } else {
-                    pane.classList.remove('active');
-                }
-            });
-        });
-    });
-
-    // Make dashboard quote button open the booking modal
-    const dashboardQuoteBtn = document.getElementById('dashboard-quote-btn');
-    const mainQuoteButton = document.getElementById('quote-button'); // Reuse logic tied to main button if possible
-    if(dashboardQuoteBtn && mainQuoteButton) {
-        dashboardQuoteBtn.addEventListener('click', () => {
-            mainQuoteButton.click(); // Trigger the click event of the main button
-        });
-    }
-});
-</script>
+    <script type="module" src="http://localhost:5173/@vite/client"></script>
+    
+    <script type="module" src="http://localhost:5173/src/main.jsx"></script>
 {% endblock %}
