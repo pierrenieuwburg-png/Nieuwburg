@@ -1,182 +1,205 @@
 import React, { useState, useEffect } from 'react';
-import { getClientDashboard, getMyQuotes, getMyInvoices, getMyBookings } from '../../services/clientApi';
-import './ClientDashboard.css'; // Reusing your existing styles for consistency
+import { getClientDashboard, getMyBookings } from '../../services/clientApi';
+import { FaBroom, FaTools, FaTree, FaArrowRight, FaPlus, FaHistory, FaCalendarCheck, FaFileInvoiceDollar } from 'react-icons/fa'; 
+import './ClientHome.css';
+import { useNavigate } from 'react-router-dom';
 
 const ClientHome = () => {
+    const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState({ name: 'Neighbor' });
+  const [profile, setProfile] = useState({ name: 'Client' });
   const [stats, setStats] = useState({});
-  const [feed, setFeed] = useState([]); // Combined activity feed
+  const [upcomingJob, setUpcomingJob] = useState(null);
+  const [bookingHistory, setBookingHistory] = useState([]); // New State
 
   useEffect(() => {
-    const fetchAllData = async () => {
+    const fetchData = async () => {
       try {
-        const [dashboard, quotes, invoices, bookings] = await Promise.all([
+        const [dashData, bookingsData] = await Promise.all([
           getClientDashboard(),
-          getMyQuotes(),
-          getMyInvoices(),
           getMyBookings()
         ]);
+        
+        setProfile(dashData.profile || {});
+        setStats(dashData.stats || {});
+        
+        // --- LOGIC: Separate Future vs Past Jobs ---
+        if (bookingsData && Array.isArray(bookingsData)) {
+            const now = new Date();
+            
+            // 1. Sort all by date descending (newest first)
+            const sorted = bookingsData.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-        setProfile(dashboard.profile || { name: 'Neighbor' });
-        setStats(dashboard.stats || {});
+            // 2. Find the immediate next job (Future)
+            // We reverse temporarily to find the earliest future date
+            const upcoming = bookingsData
+                .filter(b => new Date(b.date) >= now.setHours(0,0,0,0))
+                .sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+            
+            setUpcomingJob(upcoming || null);
 
-        // --- MERGE DATA INTO ACTIVITY FEED ---
-        const feedItems = [];
-
-        // 1. Add Quotes
-        if (Array.isArray(quotes)) {
-            quotes.forEach(q => feedItems.push({
-                id: `q-${q.id}`,
-                type: 'quote',
-                dateObj: new Date(q.sort_date || q.date),
-                date: q.date,
-                title: `Quote ${q.status}`,
-                desc: `${q.service_title} - R${q.amount?.toFixed(2)}`,
-                status: q.status,
-                action: q.status === 'Sent' ? 'Review' : 'View'
-            }));
+            // 3. Filter for History (Past jobs)
+            const history = sorted.filter(b => new Date(b.date) < now.setHours(0,0,0,0));
+            setBookingHistory(history.slice(0, 5)); // Limit to last 5
         }
-
-        // 2. Add Invoices
-        if (Array.isArray(invoices)) {
-            invoices.forEach(inv => feedItems.push({
-                id: `i-${inv.id}`,
-                type: 'invoice',
-                dateObj: new Date(inv.issue_date || Date.now()), // Fallback
-                date: inv.issue_date || inv.due_date,
-                title: `Invoice #${inv.number}`,
-                desc: `Due: ${inv.due_date} - R${inv.total?.toFixed(2)}`,
-                status: inv.status,
-                action: inv.status === 'Unpaid' ? 'Pay Now' : 'View'
-            }));
-        }
-
-        // 3. Add Bookings
-        if (Array.isArray(bookings)) {
-            bookings.forEach(b => feedItems.push({
-                id: `b-${b.id}`,
-                type: 'booking',
-                dateObj: new Date(b.date),
-                date: b.date,
-                title: 'Scheduled Job',
-                desc: `${b.service_name} at ${b.time}`,
-                status: b.status,
-                action: 'Details'
-            }));
-        }
-
-        // Sort by Date Descending (Newest First)
-        feedItems.sort((a, b) => b.dateObj - a.dateObj);
-        setFeed(feedItems);
 
       } catch (err) {
-        console.error("Dashboard Error:", err);
+        console.error(err);
       } finally {
         setLoading(false);
       }
     };
-
-    fetchAllData();
+    fetchData();
   }, []);
 
-  if (loading) return <div className="p-10 text-center text-gray-500">Loading your concierge...</div>;
+  if (loading) return <div className="loading-state">Loading...</div>;
 
   return (
-    <div className="client-home-view">
-      
-      {/* 1. HERO CARD */}
-      <div className="dashboard-hero-card" style={{
-          background: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
-          color: 'white',
-          padding: '2.5rem',
-          borderRadius: '16px',
-          marginBottom: '2.5rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)'
-      }}>
-        <div>
-            <h1 style={{margin: '0 0 0.5rem 0', fontSize: '1.8rem'}}>Good Morning, {profile.name}!</h1>
-            <p style={{margin: 0, opacity: 0.9, fontSize: '1.1rem'}}>
-                You have <strong>{stats.upcoming_jobs || 0}</strong> upcoming jobs and <strong>{stats.pending_quotes || 0}</strong> pending items.
-            </p>
-        </div>
-        <button className="btn-primary" style={{
-            backgroundColor: 'white', 
-            color: '#111827', 
-            fontWeight: 'bold', 
-            padding: '0.8rem 1.5rem',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer'
-        }}>
-            + Book New Service
-        </button>
-      </div>
+    <div className="client-home-container">
+      {/* 1. NEW: Action Alert Widget (Insert before Service Dock or in layout-main) */}
+      {stats.unpaid_invoices > 0 && (
+          <div className="alert-banner" style={{
+              backgroundColor: '#fff1f2', border: '1px solid #fecaca', borderRadius: '8px',
+              padding: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+          }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#991b1b' }}>
+                  <FaFileInvoiceDollar size={20} />
+                  <span>You have <strong>{stats.unpaid_invoices} unpaid invoice(s)</strong> requiring attention.</span>
+              </div>
+              <button 
+                  onClick={() => navigate('/client/dashboard/payments')}
+                  style={{ backgroundColor: '#991b1b', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                  View Invoices
+              </button>
+          </div>
+      )}
 
-      <div className="dashboard-grid" style={{display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem'}}>
+      {/* SECTION 1: Service Dock */}
+      <section className="service-dock-section">
+        <h2 className="section-heading">Start a new request</h2>
+        <div className="service-dock">
+            <button className="service-card" onClick={() => window.location.href = '/#booking-section'}>
+                <div className="icon-box clean"><FaBroom /></div>
+                <span>Cleaning</span>
+            </button>
+            <button className="service-card" onClick={() => window.location.href = '/#booking-section'}>
+                <div className="icon-box garden"><FaTree /></div>
+                <span>Gardening</span>
+            </button>
+            <button className="service-card" onClick={() => window.location.href = '/#booking-section'}>
+                <div className="icon-box fix"><FaTools /></div>
+                <span>Maintenance</span>
+            </button>
+            <button className="service-card new">
+                <div className="icon-box add"><FaPlus /></div>
+                <span>Other</span>
+            </button>
+        </div>
+      </section>
+
+      <div className="dashboard-split-layout">
         
-        {/* 2. MAIN FEED (Timeline) */}
-        <div className="feed-section">
-            <h3 className="section-title" style={{marginBottom: '1.5rem', color: '#374151'}}>Recent Activity</h3>
+        {/* LEFT COLUMN: Active Stuff */}
+        <div className="layout-main">
             
-            {feed.length === 0 ? (
-                <div className="empty-state">No recent activity. Time to book a clean?</div>
-            ) : (
-                <div className="activity-feed">
-                    {feed.map((item) => (
-                        <div key={item.id} className="feed-item" style={{
-                            background: 'white',
-                            padding: '1.25rem',
-                            borderRadius: '12px',
-                            marginBottom: '1rem',
-                            border: '1px solid #f3f4f6',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
-                        }}>
-                            <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
-                                {/* Icon based on type */}
-                                <div style={{
-                                    width: '40px', height: '40px', borderRadius: '50%', 
-                                    background: item.type === 'invoice' ? '#fee2e2' : item.type === 'quote' ? '#fef3c7' : '#dbeafe',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    fontSize: '1.2rem'
-                                }}>
-                                    {item.type === 'invoice' ? '💳' : item.type === 'quote' ? '📄' : '🧹'}
-                                </div>
-                                <div>
-                                    <div style={{fontWeight: '600', color: '#1f2937'}}>{item.title}</div>
-                                    <div style={{fontSize: '0.9rem', color: '#6b7280'}}>{item.desc}</div>
-                                </div>
-                            </div>
-                            
-                            <div style={{textAlign: 'right'}}>
-                                <span className={`badge ${item.status.toLowerCase()}`} style={{marginBottom: '0.5rem', display: 'inline-block'}}>
-                                    {item.status}
-                                </span>
-                                <div style={{fontSize: '0.8rem', color: '#9ca3af'}}>{item.date}</div>
-                            </div>
-                        </div>
-                    ))}
+            {/* 1. UPCOMING JOB CARD */}
+            <div className="status-card">
+                <div className="card-header">
+                    <h3>Next Scheduled Jobs</h3>
+                    <button className="btn-text">View All <FaArrowRight /></button>
                 </div>
-            )}
-        </div>
-
-        {/* 3. SIDE WIDGETS (Stats & Upsell) */}
-        <div className="widgets-section">
-            <div className="stat-widget" style={{background: 'white', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e5e7eb', marginBottom: '1.5rem'}}>
-                <h4 style={{margin: '0 0 1rem 0', color: '#6b7280', fontSize: '0.9rem', textTransform: 'uppercase'}}>Unpaid Invoices</h4>
-                <div style={{fontSize: '2.5rem', fontWeight: 'bold', color: '#111827'}}>{stats.unpaid_invoices || 0}</div>
+                {upcomingJob ? (
+                    <div className="job-preview-row">
+                        <div className="date-box">
+                            <span className="day">{new Date(upcomingJob.date).getDate()}</span>
+                            <span className="month">{new Date(upcomingJob.date).toLocaleString('default', { month: 'short' })}</span>
+                        </div>
+                        <div className="job-info">
+                            <h4>{upcomingJob.service_name}</h4>
+                            <p>{upcomingJob.time} • Assigned Staff</p>
+                        </div>
+                        <span className={`status-pill ${upcomingJob.status.toLowerCase().replace(' ', '-')}`}>{upcomingJob.status}</span>
+                    </div>
+                ) : (
+                    <div className="empty-job-state">
+                        <p>No upcoming jobs scheduled.</p>
+                    </div>
+                )}
             </div>
 
-            <div className="stat-widget" style={{background: 'white', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e5e7eb'}}>
-                <h4 style={{margin: '0 0 1rem 0', color: '#6b7280', fontSize: '0.9rem', textTransform: 'uppercase'}}>BlitzCoins</h4>
-                <div style={{fontSize: '2.5rem', fontWeight: 'bold', color: '#f59e0b'}}>0</div>
-                <p style={{fontSize: '0.9rem', color: '#6b7280', marginTop: '0.5rem'}}>Earn rewards on every booking.</p>
+            {/* 2. BOOKING HISTORY (NEW SECTION) */}
+            <div className="history-section">
+                <div className="card-header">
+                    <h3>Booking History</h3>
+                    {/* Link to full bookings page */}
+                    <button className="btn-text" onClick={() => window.location.href='/client/dashboard/bookings'}>
+                        Full History <FaArrowRight />
+                    </button>
+                </div>
+                
+                <div className="history-list">
+                    {bookingHistory.length === 0 ? (
+                        <div className="empty-job-state">No past bookings found.</div>
+                    ) : (
+                        bookingHistory.map((job) => (
+                            <div key={job.id} className="history-row">
+                                <div className="history-icon">
+                                    <FaCalendarCheck />
+                                </div>
+                                <div className="history-details">
+                                    <strong>{job.service_name}</strong>
+                                    <span className="history-date">{job.date}</span>
+                                </div>
+                                <span className={`status-text ${job.status.toLowerCase().replace(' ', '-')}`}>
+                                    {job.status}
+                                </span>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            {/* 3. MY TEAM SECTION */}
+            <div className="team-section">
+                <h3 className="section-heading">My BlitzHelp Team</h3>
+                <div className="team-grid">
+                    <div className="team-card">
+                        <div className="avatar">S</div>
+                        <div className="team-info">
+                            <strong>Sarah J.</strong>
+                            <span>Residential Cleaner</span>
+                        </div>
+                        <button className="btn-sm">Book</button>
+                    </div>
+                    
+                    <div className="team-card add-new">
+                        <div className="avatar-plus">+</div>
+                        <div className="team-info">
+                            <strong>Find Help</strong>
+                            <span>Browse Pros</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        {/* RIGHT COLUMN: Wallet & Promos */}
+        <div className="layout-side">
+            <div className="wallet-widget">
+                <small>Available Credit</small>
+                <div className="balance">R 0.00</div>
+                <div className="wallet-actions">
+                    <button>Top Up</button>
+                    <button>Refer Friend</button>
+                </div>
+            </div>
+
+            <div className="promo-widget">
+                <strong>Refer & Earn</strong>
+                <p>Get R150 for every friend who books their first clean.</p>
+                <button className="btn-block">Copy Link</button>
             </div>
         </div>
 

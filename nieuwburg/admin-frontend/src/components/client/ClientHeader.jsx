@@ -19,20 +19,23 @@ const ClientHeader = ({ toggleSidebar }) => {
 
   return (
     <header className="client-top-header">
-      <button className="mobile-menu-btn" onClick={toggleSidebar}>
-        ☰
-      </button>
+      {/* 1. Left Side: Toggle + Logo */}
+      <div className="header-brand-area">
+        <Link to="/client/dashboard" className="header-logo-link">
+            <img src="/static/img/LogoBlackWithTitle.png" alt="Nieuwburg Blitz" className="header-logo" />
+        </Link>
+      </div>
 
-      {/* Spacer to push profile to the right */}
+      {/* 2. Spacer */}
       <div className="header-spacer"></div>
 
-      {/* Profile Section */}
+      {/* 3. Right Side: Profile */}
       <div className="header-profile-container" ref={dropdownRef}>
         <div 
           className="profile-circle" 
           onClick={() => setShowDropdown(!showDropdown)}
         >
-          {/* Placeholder for user image - ideally dynamic */}
+          {/* Placeholder for user image */}
           <img src="/static/img/avatar_picture_profile_user_icon.png" alt="Profile" />
         </div>
 
@@ -45,9 +48,6 @@ const ClientHeader = ({ toggleSidebar }) => {
             </div>
             <Link to="/client/dashboard/profile" className="dropdown-item" onClick={() => setShowDropdown(false)}>
               Edit Profile
-            </Link>
-            <Link to="/client/dashboard/settings" className="dropdown-item" onClick={() => setShowDropdown(false)}>
-              Settings
             </Link>
             <div className="dropdown-divider"></div>
             <a href="/auth/logout" className="dropdown-item text-red">

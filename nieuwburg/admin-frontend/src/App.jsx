@@ -22,6 +22,8 @@ import FormalQuoteDetail from './pages/FormalQuoteDetail';
 import EditQuote from './pages/EditQuote';
 import BusinessSettings from './pages/BusinessSettings';
 import SetupWizard from './pages/SetupWizard';
+import ClientPayments from './pages/client/ClientPayments';
+import ClientQuotes from './pages/client/ClientQuotes';
 
 // --- NEW CLIENT IMPORTS ---
 import ClientLayout from './layouts/ClientLayout';
@@ -80,9 +82,10 @@ function App() {
         <Route path="bookings" element={<Placeholder title="My Bookings" />} />
         <Route path="partners" element={<Placeholder title="BlitzPartners" />} />
         <Route path="locations" element={<Placeholder title="My Locations" />} />
-        <Route path="payments" element={<Placeholder title="Payments & Wallets" />} />
+        <Route path="payments" element={<ClientPayments />} />
         <Route path="rewards" element={<Placeholder title="BlitzCoins & Rewards" />} />
         <Route path="vouchers" element={<Placeholder title="Vouchers" />} />
+        <Route path="quotes" element={<ClientQuotes />} />
         
       </Route>
 
