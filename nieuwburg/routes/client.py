@@ -3,6 +3,7 @@ from flask_login import login_required, current_user
 from sqlalchemy.orm import joinedload
 from ..models import QuoteRequest, Quote, Invoice, Job, Profile
 from .. import db
+from datetime import datetime
 import os
 
 # --- NEW IMPORTS from utils (Ensure these exist in routes/utils.py) ---
@@ -123,7 +124,6 @@ def update_my_profile():
         return jsonify({"message": "Error updating profile"}), 500
 
 # --- NEW ROUTES FOR PDF & ACCEPTANCE ---
-
 @bp.route('/api/quotes/<int:quote_id>/download', methods=['GET'])
 @login_required
 def download_client_quote(quote_id):
@@ -179,9 +179,58 @@ def respond_to_quote(quote_id):
     db.session.commit()
     return jsonify({"message": f"Quote {action}ed successfully"})
 
-# =========================================================
-# 2. SPA SHELL ROUTE
-# =========================================================
+from datetime import datetime 
+
+@bp.route('/api/bookings', methods=['POST'])
+@login_required
+def create_booking():
+    if not check_client_access(): return jsonify({"message": "Unauthorized"}), 403
+    
+    data = request.json
+    service_type = data.get('service_type')
+    frequency = data.get('frequency')
+    notes = data.get('notes')
+    date_str = data.get('date')
+    time_str = data.get('time')
+    
+    if not service_type or not date_str:
+        return jsonify({"message": "Service and Date are required"}), 400
+
+    try:
+        # Link to the user's associated tenant (Business-in-a-Box context)
+        # We look for a profile linked to a tenant. 
+        business_profile = next((p for p in current_user.profiles if p.tenant_id is not None), None)
+        tenant_id = business_profile.tenant_id if business_profile else None
+
+        # Use personal profile for contact details
+        personal_profile = next((p for p in current_user.profiles if p.tenant_id is None), None)
+        
+        new_req = QuoteRequest(
+            user_id=current_user.id,
+            tenant_id=tenant_id,
+            primary_service=service_type,
+            service_frequency=frequency,
+            description=f"{notes} (Requested for {date_str} {time_str})",
+            request_date=datetime.utcnow(),
+            status='Pending',
+            # Populate contact info from User/Profile
+            name=personal_profile.full_name if personal_profile else current_user.email,
+            email=current_user.email,
+            phone=personal_profile.phone_number if personal_profile else None,
+            address=personal_profile.address if personal_profile else None
+        )
+        
+        db.session.add(new_req)
+        db.session.commit()
+        
+        log_activity('New Booking Request', f"Client {current_user.email} requested {service_type}", tenant_id=tenant_id)
+        
+        return jsonify({"message": "Booking request submitted successfully"}), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error creating booking: {e}")
+        return jsonify({"message": "Error processing request"}), 500
 
 @bp.route('/', defaults={'path': ''})
 @bp.route('/<path:path>')

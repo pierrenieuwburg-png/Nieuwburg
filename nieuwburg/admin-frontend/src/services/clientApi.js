@@ -143,3 +143,20 @@ export const respondToQuote = async (quoteId, action) => {
         throw error;
     }
 };
+
+export const createBooking = async (bookingData) => {
+    try {
+        const response = await fetch(`${API_BASE}/bookings`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify(bookingData)
+        });
+        
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Failed to create booking');
+        return result;
+    } catch (error) {
+        console.error("Client API Error:", error);
+        throw error;
+    }
+};

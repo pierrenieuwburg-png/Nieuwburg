@@ -3,6 +3,7 @@ import { getClientDashboard, getMyBookings } from '../../services/clientApi';
 import { FaBroom, FaTools, FaTree, FaArrowRight, FaPlus, FaHistory, FaCalendarCheck, FaFileInvoiceDollar } from 'react-icons/fa'; 
 import './ClientHome.css';
 import { useNavigate } from 'react-router-dom';
+import ClientBookingModal from '../../components/ClientBookingModal';
 
 const ClientHome = () => {
     const navigate = useNavigate();
@@ -10,7 +11,9 @@ const ClientHome = () => {
   const [profile, setProfile] = useState({ name: 'Client' });
   const [stats, setStats] = useState({});
   const [upcomingJob, setUpcomingJob] = useState(null);
-  const [bookingHistory, setBookingHistory] = useState([]); // New State
+  const [bookingHistory, setBookingHistory] = useState([]);
+  const [bookingModal, setBookingModal] = useState({ open: false, service: '' });
+  const openBooking = (service) => setBookingModal({ open: true, service });
 
   useEffect(() => {
     const fetchData = async () => {
@@ -53,7 +56,7 @@ const ClientHome = () => {
   }, []);
 
   if (loading) return <div className="loading-state">Loading...</div>;
-
+  
   return (
     <div className="client-home-container">
       {/* 1. NEW: Action Alert Widget (Insert before Service Dock or in layout-main) */}
